@@ -1,0 +1,81 @@
+---
+description: "Acceptance criteria standards and project-specific recurring bug category gates"
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Acceptance Criteria Standard
+
+Every issue or implementation prompt must include acceptance criteria that let a reviewer decide completion with a clear pass/fail result.
+
+Acceptance criteria must be:
+
+- Specific, testable, observable, and scoped.
+- Written as user-visible outcomes, API/MCP contracts, data invariants, or explicit validation commands.
+- Updated when docs, schema, MCP tools, routes, or deployment behavior changes.
+
+Acceptance criteria must not be vague process notes such as "works", "tests added", or "refactor complete".
+
+## Core Rule
+
+Every issue must include an `## Acceptance Criteria` section before implementation begins. If the AC cannot prove the work is complete, the issue is not ready.
+
+## Category-Binding Gate
+
+If a change touches a recurring issue category in `documentation/standards/ISSUE_LOG.md`, the acceptance criteria must include the matching prevention checklist inline.
+
+| If the issue touches... | Include checklist from... |
+|---|---|
+| Issue lifecycle, sequence allocation, dependencies, or status transitions | `IT-1` Tracker State Integrity |
+| Categories, acceptance criteria, issue logs, or recurring bug prevention | `IT-2` Category And AC Binding |
+| SQLAlchemy models, repositories, Alembic, or PostgreSQL constraints | `IT-3` Schema And Migration Safety |
+| MCP tools, compact outputs, tool schemas, or stdio behavior | `IT-4` MCP Contract And Token Discipline |
+| Login, sessions, admin setup, secrets, or access control | `IT-5` Auth And Secret Safety |
+| Docker Compose, env vars, health checks, or deployment workflows | `IT-6` Deployment And Configuration Drift |
+
+Do not copy peer taxonomy content into this table. Update only from this project's issue log.
+
+## Writing Standard
+
+Strong acceptance criteria name the observable result and verification method:
+
+- `POST /issues` with missing acceptance criteria returns a validation error and does not create an issue row.
+- `issue.add_dependency` rejects a dependency cycle and returns a compact error without dumping issue history.
+- `alembic upgrade head` succeeds against an empty PostgreSQL database and creates the expected constraints.
+- A Docker smoke test reaches `/health` and verifies both app and database connectivity.
+
+Weak acceptance criteria are not enough:
+
+- "Issue tracker works."
+- "MCP is implemented."
+- "Database is correct."
+- "Login is secure."
+
+## Formats
+
+Use Given/When/Then for user-facing behavior:
+
+```text
+Given a project with one backlog issue
+When the user starts a sprint and adds the issue
+Then the issue status becomes in-progress, an event is recorded, and the sprint page lists the issue.
+```
+
+Use checklist format for technical work:
+
+```text
+## Acceptance Criteria
+- [ ] Service test covers the status transition.
+- [ ] Repository test proves the database constraint.
+- [ ] Web route or MCP tool returns the expected compact response.
+- [ ] Documentation is updated when behavior or commands change.
+```
+
+## Close Requirements
+
+When closing an issue, capture:
+
+- Final status and close timestamp.
+- Originating LLM or human actor when known.
+- Linked PR or commit reference when available.
+- Issue-log update if the fix maps to a recurring category.

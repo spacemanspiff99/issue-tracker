@@ -1,0 +1,64 @@
+---
+description: "Agent workflow, prompt lifecycle, task sizing, model policy, and MCP token discipline"
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Agents And Prompts
+
+## Prompt Lifecycle
+
+- Execution prompts live in `documentation/prompts/` or inside issue/sprint planning folders if this repository later dogfoods its own tracker exports.
+- New prompts must name the rules to load: `core.mdc`, `agents.mdc`, `ac.mdc`, and any scoped rule matching the work.
+- A prompt is done only after code is implemented, relevant tests pass, docs are updated when behavior changes, and the next handoff is explicit.
+- Do not run a large prompt in the same chat that created it. Start a fresh chat when the prompt is intended as a long implementation handoff.
+
+## Prompt Content
+
+Every implementation prompt should include:
+
+- Problem statement and project context.
+- Concrete file paths or modules to inspect first.
+- Acceptance criteria with pass/fail checks.
+- Required validation commands.
+- A `STOP` section naming what remains or the next prompt to run.
+
+## Micro-Task Principle
+
+- Keep agent tasks small enough to verify independently.
+- Split schema, service, web, MCP, and deployment changes unless a single invariant requires them together.
+- Prefer one behavioral change per PR. Rules sync or project setup changes should not be mixed with product features.
+
+## Parallelism And Dependencies
+
+- Run independent reads, searches, and tests in parallel where tools allow it.
+- Do not parallelize edits to the same file or migrations that depend on one another.
+- Database schema changes must land before service code that depends on them, and service tests must land before web/MCP wiring is treated as complete.
+
+## Model Policy
+
+- Default to the workspace-approved latest Claude Sonnet model for routine implementation and review unless the user specifies a different model.
+- Escalate to Opus only for hard architecture tradeoffs, difficult debugging, or security-sensitive review.
+- Never select Composer 2 or Auto as the project default.
+- When a user explicitly requests a model, follow that request if the environment supports it.
+
+## Issue Tracker Dogfooding
+
+- The product manages projects, issues, sprints, dependencies, categories, issue logs, and MCP tools. Treat these as first-class domain concepts.
+- Do not hardcode this repository's categories as global constants. The app must allow each tracked project to define its own taxonomy.
+- When implementing MCP tools, optimize for the agent use case: concise outputs, stable IDs, filters, and opt-in detail.
+
+## STOP Protocol
+
+Before declaring a task complete:
+
+- Check the working tree and list any uncommitted files touched.
+- Run the relevant tests or explain why they could not run.
+- Confirm no secrets, `.env` files, database dumps, logs, or large generated files were added.
+- State the next smallest useful step if the work is not fully complete.
+
+## Cross-References
+
+- Acceptance criteria and category gates: [ac.mdc](.cursor/rules/ac.mdc)
+- FastAPI, SQLAlchemy, Alembic, and MCP implementation: [backend.mdc](.cursor/rules/backend.mdc)
+- Docker, migrations, workflows, and deployment safety: [devops.mdc](.cursor/rules/devops.mdc)

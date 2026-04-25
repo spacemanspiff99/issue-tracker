@@ -1,0 +1,81 @@
+name: Mirror .cursor/rules to vibecoding
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".cursor/rules/**"
+      - ".github/workflows/mirror-rules.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: mirror-rules-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_NAME: issue-tracker
+    steps:
+      - name: Check out source repo
+        uses: actions/checkout@v4
+        with:
+          path: source
+
+      - name: Check out vibecoding
+        uses: actions/checkout@v4
+        with:
+          repository: spacemanspiff99/vibecoding
+          path: vibecoding
+          token: ${{ secrets.VIBECODING_MIRROR_TOKEN }}
+          persist-credentials: true
+
+      - name: Copy rules and write provenance
+        run: |
+          set -euo pipefail
+          DEST="vibecoding/projects/${PROJECT_NAME}/cursor-rules"
+          mkdir -p "${DEST}"
+          find "${DEST}" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exec rm -rf {} +
+          cp -a source/.cursor/rules/. "${DEST}/"
+          cat > "vibecoding/projects/${PROJECT_NAME}/cursor-rules/.mirror-source.json" <<EOF
+          {
+            "project": "${PROJECT_NAME}",
+            "source_repo": "${GITHUB_REPOSITORY}",
+            "source_branch": "${GITHUB_REF_NAME}",
+            "source_sha": "${GITHUB_SHA}",
+            "actor": "${GITHUB_ACTOR}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "mirrored_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+      - name: Commit and push
+        working-directory: vibecoding
+        run: |
+          set -euo pipefail
+          git config user.name "vibecoding-mirror[bot]"
+          git config user.email "vibecoding-mirror@users.noreply.github.com"
+          git add "projects/${PROJECT_NAME}/cursor-rules"
+          if git diff --cached --quiet; then
+            echo "No rule changes to mirror."
+            exit 0
+          fi
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          git commit -m "chore(mirror): sync ${PROJECT_NAME} rules @ ${SHORT_SHA}" \
+            -m "Source: ${GITHUB_REPOSITORY}@${GITHUB_SHA}" \
+            -m "Actor: ${GITHUB_ACTOR}" \
+            -m "Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Push attempt ${attempt} failed; rebasing and retrying..."
+            git pull --rebase origin main
+          done
+          echo "::error::Push failed after 3 attempts"
+          exit 1

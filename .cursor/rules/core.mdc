@@ -1,0 +1,69 @@
+---
+description: "Issue Tracker core rules: architecture, repository layout, project-specific invariants, and sync history"
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Issue Tracker Core Rules
+
+This project is a personal issue tracker that replaces repo-local markdown trackers with one Python service: FastAPI + Jinja templates, SQLAlchemy 2.x, Alembic, PostgreSQL, and a stdio MCP server backed by the same service layer.
+
+## Rule Hierarchy
+
+Load these rules by task shape:
+
+- [agents.mdc](.cursor/rules/agents.mdc): prompts, task sizing, model choice, sprint/task lifecycle, and MCP-facing agent behavior.
+- [ac.mdc](.cursor/rules/ac.mdc): acceptance criteria, category-binding checks, issue close requirements, and recurring bug prevention.
+- [backend.mdc](.cursor/rules/backend.mdc): FastAPI, Jinja, SQLAlchemy, Alembic, PostgreSQL, service layer, and MCP implementation.
+- [devops.mdc](.cursor/rules/devops.mdc): Docker Compose, environment variables, migrations, deployment safety, GitHub Actions, and secret handling.
+
+## Project Invariants
+
+- Keep implementation in `src/issue_tracker/`; use `src/issue_tracker/web/`, `src/issue_tracker/mcp/`, `src/issue_tracker/domain/`, `src/issue_tracker/services/`, and `src/issue_tracker/repositories/`.
+- Keep Alembic migrations in the single central `migrations/` folder. Do not create another migration folder.
+- Keep docs in `documentation/`; planning docs live in `documentation/planning/`, architecture in `documentation/architecture/`, guides in `documentation/guides/`, and standards in `documentation/standards/`.
+- Keep deployment files in `deployment/`; root may contain only unavoidable metadata such as `README.md`, `pyproject.toml`, `.gitignore`, and `.env.example`.
+- Use a single `main` branch strategy unless the repository explicitly adopts another branch model.
+- Do not import any peer project's category taxonomy. This project owns its taxonomy in `documentation/standards/ISSUE_LOG.md`.
+- Treat categories as project-scoped data in the app schema. Never hardcode weather-app, investments, or storyteller category names into application logic.
+
+## Architecture Boundaries
+
+- The web app and MCP server must call the same service layer. Do not duplicate issue lifecycle logic in route handlers and MCP tools.
+- Route handlers should validate request shape, call services, and render responses. Business rules belong in services and domain objects.
+- Repositories own database persistence. Services should not assemble ad hoc SQL unless the repository API cannot express the query cleanly.
+- Jinja pages are the v1 UI. Do not introduce React, Next.js, or a frontend build pipeline without an explicit architecture change.
+- MCP tools must return compact summaries by default. Full issue text, acceptance criteria, and history are opt-in by ID.
+
+## Critical Thinking
+
+- Prefer the smallest implementation that preserves durable data, clear migrations, and MCP/web parity.
+- If a requested shortcut risks data loss, secret exposure, or tracker state drift, stop and explain the safer path.
+- Do not claim a workflow works until it has been tested through the relevant surface: service tests, web route tests, MCP tool tests, or Docker smoke tests.
+
+## Code Quality
+
+- Use typed Python and small functions with one clear purpose.
+- Keep duplicated logic under three lines; extract shared lifecycle, validation, and serialization helpers.
+- Use explicit names for state transitions and project-scoped sequence allocation.
+- Favor boring, inspectable code over framework magic.
+
+## File And Folder Organization
+
+- Search the repo before creating a folder; reuse existing locations.
+- Do not create loose implementation files in the root.
+- Do not create duplicate database migration folders.
+- Put generated exports, backups, logs, and local test artifacts under ignored folders.
+
+## Security
+
+- Never commit passwords, API keys, tokens, database dumps, `.env` files, or generated backups.
+- Use environment variables for `DATABASE_URL`, `APP_SECRET_KEY`, admin setup values, session settings, and MCP enablement.
+- Passwords must be hashed with Argon2 or bcrypt, never stored or logged in plaintext.
+- Session cookies must be HTTP-only and SameSite=Lax; make the secure flag configurable for local versus deployed use.
+
+## Version History
+
+| Date | Change | Peer sources consulted | Skipped |
+|---|---|---|---|
+| 2026-04-24 | Initial issue-tracker rules stack: core, agents, AC, backend, devops, project issue-log taxonomy, and vibecoding onboarding scaffold. Adapted local markdown tracker workflow into a database-backed FastAPI/Jinja/MCP product. | weather-app `14ec98d23b9756fe9c2352a23f49d4f453bff60e`; investments `05141f032eb1539779ab496c9e7a7be47c8d02c7`; storyteller `39df73305bdef93b66c13df925fe222106516fef`; handbrake2resilio `6b428bca2688ccb4624bcb90c76c13b398be6a34`; scripts `abba09819c09a6cadee50efa1936e00c0a1a071f` | Weather host topology and dev/master branch flow; React/Playwright/Magic Patterns rules; investments finance taxonomy and simulation rules; storyteller iOS/Firebase rules; all peer `ISSUE_LOG.md` content. |

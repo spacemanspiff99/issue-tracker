@@ -1,0 +1,58 @@
+---
+description: "Deployment, Docker Compose, environment, GitHub Actions, migration, and secret-safety rules"
+globs: [".github/workflows/*.yml", ".github/workflows/*.yaml", "deployment/**/*", "Dockerfile", "docker-compose*.yml", "pyproject.toml", ".gitignore", ".env.example"]
+alwaysApply: false
+---
+
+# DevOps And Local Operations
+
+## Environment And Secrets
+
+- Use environment variables for all runtime configuration.
+- Commit `.env.example` with placeholders only. Never commit `.env`, database dumps, backups, tokens, passwords, or real connection strings.
+- Required settings include `DATABASE_URL`, `APP_SECRET_KEY`, `APP_BASE_URL`, `ADMIN_USERNAME`, `SESSION_COOKIE_SECURE`, `MCP_ENABLED`, and `LOG_LEVEL`.
+- If first-run setup supports `ADMIN_INITIAL_PASSWORD`, it must be one-time use and never logged.
+
+## Docker Compose
+
+- Keep compose files under `deployment/`.
+- Use `deployment/docker-compose.local.yml` for app plus local PostgreSQL.
+- Use `deployment/docker-compose.app.yml` for app-only deployment against an external PostgreSQL URL.
+- Build FastAPI images from an official Python base image and use exec-form commands.
+- Do not run Docker with `sudo`.
+
+## Migrations And Startup
+
+- Run `alembic upgrade head` as an explicit documented step before app startup in deployment.
+- Local development may provide a helper script, but it must make migration execution visible.
+- Do not auto-drop, recreate, or truncate databases from container startup.
+- A deployment is not verified until `/health` confirms database connectivity.
+
+## GitHub Actions Workflow Safety
+
+- Workflow YAML must be ASCII-only.
+- Validate YAML syntax before pushing when workflows change.
+- Keep workflows small: lint/test, Docker build, and mirror rules are separate concerns.
+- Do not author workflows directly on `main` unless explicitly requested.
+- Use concurrency for deploy or mirror workflows that can race.
+
+## Mirror Rules Workflow
+
+- This project mirrors `.cursor/rules/` to `spacemanspiff99/vibecoding` after rules changes land on `main`.
+- The vibecoding path is `projects/issue-tracker/cursor-rules/`.
+- The mirror is one-way from this project to vibecoding. Never edit mirrored rule content in vibecoding by hand.
+- The GitHub secret must be named `VIBECODING_MIRROR_TOKEN` and scoped only to vibecoding contents read/write.
+
+## Verification Commands
+
+Use the relevant subset before completion:
+
+```bash
+python -m pytest tests/
+alembic upgrade head
+docker compose -f deployment/docker-compose.local.yml up --build
+python -c "import yaml; yaml.safe_load(open('.github/workflows/mirror-rules.yml'))"
+LC_ALL=C grep -RIn '[^ -~]' .cursor/rules .github/workflows documentation/standards
+```
+
+If a command cannot run because the project is not initialized yet, say so and verify the files that do exist.

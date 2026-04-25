@@ -1,0 +1,76 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.env
+config.json
+secrets.json
+credentials.json
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Local artifacts and generated data
+logs/
+*.log
+*.out
+*.err
+exports/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+
+# Build artifacts
+dist/
+build/
+target/
+*.egg-info/
+
+# Large archives and media
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.iso
+*.dmg
+*.pkg
+*.mp4
+*.mov
+*.mkv
+*.mp3
+*.wav
+*.flac
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.pdf
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+*.swp
+*.swo
+*~
