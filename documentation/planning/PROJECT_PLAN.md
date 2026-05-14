@@ -43,7 +43,7 @@ Required implementation discipline:
 V1 should replace repo-local markdown issue tracking with a web UI and Postgres backend while preserving the workflow concepts from the weather-app rules:
 - Projects with independent configuration.
 - Sprints and sprint task prompts.
-- Issues with global project-local sequence IDs.
+- Issues and sprints with shared project-local `NNNN` sequence IDs.
 - Backlog, in-progress, and done lifecycle.
 - Issue dependencies and blockers.
 - Acceptance criteria required on every issue.
@@ -78,7 +78,7 @@ One codebase, two entrypoints:
 - MCP entrypoint: stdio MCP server exposing compact tools backed by the same service layer.
 
 Deployment shape:
-- Local development: compose starts app + local Postgres.
+- Local development: compose starts app + local Postgres; Python dependencies, test tools, Alembic, and app commands run inside containers by default.
 - Later deployment: compose starts only the app container and points at an external Postgres using environment variables.
 
 ## Proposed Repository Layout
@@ -117,7 +117,7 @@ Core tables:
 - `app_settings`: install/setup parameters from environment or first-run setup.
 
 Important constraints:
-- Issue and sprint sequence numbers are unique per project and share one sequence counter.
+- Issue and sprint sequence numbers are unique per project, share one sequence counter, and display as four-digit zero-padded IDs such as `0001`.
 - Issue filenames from the old markdown tracker become stable display/import metadata, not filesystem state.
 - Dependencies must reject self-dependencies and cycles.
 - Done issues keep immutable close metadata including originating LLM.
@@ -198,48 +198,93 @@ Compose strategy:
 - `deployment/docker-compose.local.yml`: app + local Postgres for development.
 - `deployment/docker-compose.app.yml`: app only, external Postgres supplied by env/compose.
 - `deployment/.env.example`: documented setup parameters without secrets.
+- Host dependency rule: do not require host-level `pip install`, host virtualenv setup, host PostgreSQL, or host Alembic/test tooling for normal development. The host should need Docker/Compose, Git, and optional editor tooling only.
 
 Container strategy:
 - Build from official Python base image.
 - Run a single FastAPI process per container initially.
-- Run migrations as an explicit command before app startup in local dev; for deployment, document the migration step clearly rather than hiding destructive changes.
+- Run tests, linting, Alembic migrations, import/export checks, and MCP smoke tests through `docker compose run --rm app ...` or an equivalent documented container command.
+- Run migrations as an explicit container command before app startup in local dev; for deployment, document the migration step clearly rather than hiding destructive changes.
 - Health endpoint checks app and database connectivity.
+- Mount source into the local development app container for quick iteration, but keep dependency caches, database volumes, logs, exports, and backups in ignored Docker volumes or ignored project folders.
 
 ## MVP Sprint Plan
 
 These sprints are ordered so each one can be verified independently and handed to a fresh implementation chat. Each implementation prompt must load `core.mdc`, `agents.mdc`, `ac.mdc`, and the scoped rule files named in the sprint.
 
-### Sprint 0: Project Foundation And Local Runtime
+### Sprint Execution Standard
+
+Each sprint must iterate to completion:
+- Implement the smallest coherent slice.
+- Run the listed containerized validation commands.
+- If validation fails, inspect the failure, fix the cause, and rerun the relevant command.
+- Repeat until every listed validation command passes, or until an external blocker prevents progress.
+- Do not mark a sprint, risk issue, or implementation prompt complete with failing tests, skipped gates, or unverified behavior.
+- If a blocker remains, record the exact command, failure output summary, suspected cause, owner action needed, and the next retry step in the STOP section.
+- Keep testing evidence with the sprint closeout: command, pass/fail result, and any intentionally deferred coverage.
+
+Subagent model policy:
+- Use GPT-5.5 with `high` reasoning for delegated subtasks that touch architecture, schema and migrations, auth or secrets, deployment, MCP tool contracts, data integrity, difficult debugging, or release readiness.
+- Use lighter subagent models only for narrow, mechanical, low-risk work with clear inputs, disjoint write scope, and simple verification.
+- Each delegated subtask must name its model/reasoning choice, ownership scope, validation command, and handoff evidence.
+
+### Risk-Burn-Down Issues
+
+The first implementation pass must include explicit issues for the main risks below. Do not leave these as loose concerns or end-of-sprint notes; each owning sprint should create or track the issue before implementation starts, include the listed acceptance criteria, and close it only with evidence.
+
+| Risk | Planned issue | Owning sprint | Required acceptance criteria |
+|---|---|---|---|
+| Source checkout and guidance mirror drift | Repository bootstrap and AI-guidance mirror readiness | Sprint 0001 | Work starts from a real Git checkout; `AGENTS.md` exists for Codex; `.github/workflows/mirror-rules.yml` mirrors Cursor rules, Cursor skills, Codex guidance, and Claude memory to `vibecoding`; missing `VIBECODING_MIRROR_TOKEN` or failed mirror runs are recorded as blockers with run URLs. |
+| V1 scope creep | V1 scope lock and backlog triage | Sprint 0001 | The sprint issue lists in-scope and out-of-scope V1 behavior; no React/Next.js, GitHub sync, automatic full markdown migration, drag/drop planning, or multi-user roles are added; non-MVP requests are recorded as backlog instead of folded into active sprint work. |
+| Host dependency pollution | Container-only development and verification issue | Sprint 0001 | Local setup uses Docker/Compose for app, PostgreSQL, tests, migrations, import/export checks, and MCP smoke tests; docs do not require host `pip install`, host virtualenvs, host PostgreSQL, or host Alembic. |
+| Broad schema causing untested behavior | Schema invariant and migration safety issue | Sprint 0002 | Schema documentation, initial migration, repository tests, and service tests land before web or MCP wiring; tests cover shared sequence allocation, status transitions, dependency cycle rejection, category binding, and immutable close metadata. |
+| Peer taxonomy leakage | Project-scoped category binding issue | Sprint 0002 and Sprint 0005 | Categories are stored as project data, not application constants; tests prove weather-app or other peer category names are not required by core logic; import requires explicit category mapping when source categories are present. |
+| Hidden or unsafe migration behavior | Explicit migration runbook issue | Sprint 0001, Sprint 0002, and Sprint 0005 | Compose and deployment docs require explicit `alembic upgrade head`; app startup does not auto-drop, recreate, truncate, or silently migrate production databases; `/health` reports database connectivity after migrations are run. |
+| MCP verbosity or web/MCP behavior drift | MCP contract and parity issue | Sprint 0004 | MCP tools call the same services as web routes; list outputs are bounded and compact by default; full issue content and acceptance criteria are opt-in by ID; tests assert output shape and stderr-only logging. |
+| Final integration gaps | Fresh-checkout release rehearsal issue | Sprint 0006 | A fresh checkout can run documented setup, migrations, web smoke path, MCP smoke path, CI checks, and Docker health without relying on local-only files or secrets. |
+
+### Sprint 0001: Project Foundation And Local Runtime
 
 Goal: create the minimal repository structure, Python package, dependency config, local Postgres runtime, and secret-safe defaults needed for later tested work.
 
 Rules to load: `core.mdc`, `agents.mdc`, `ac.mdc`, `devops.mdc`.
 
 Scope:
+- Add or verify Codex-native `AGENTS.md` and update the mirror workflow so `vibecoding` receives Cursor rules, Cursor skills, Codex guidance, and Claude memory as separate harness mirrors.
+- Confirm implementation starts from a real Git checkout of `spacemanspiff99/issue-tracker`; if the local working directory is not a checkout, stop and record the exact recovery path before creating package files.
 - Add `pyproject.toml`, package skeleton under `src/issue_tracker/`, `tests/`, `deployment/`, root `README.md`, `.env.example`, and a Python/Docker-safe `.gitignore`.
 - Add local compose at `deployment/docker-compose.local.yml` with app and PostgreSQL services.
 - Add app-only compose at `deployment/docker-compose.app.yml` for external PostgreSQL.
-- Add a minimal FastAPI app with `/health` returning app readiness; database connectivity can be marked pending until Sprint 1 wires persistence.
+- Add a documented container command pattern for app startup, tests, migrations, and one-off management commands; host-level Python dependency installation is not part of the normal path.
+- Add a minimal FastAPI app with `/health` returning app readiness; database connectivity can be marked pending until Sprint 0002 wires persistence.
+- Create the V1 scope lock issue and record non-MVP requests as backlog instead of broadening the active sprint.
 
 Acceptance criteria:
+- [ ] Work is performed from a real Git checkout; if not, the sprint records the recovery command and stops before implementation.
+- [ ] `AGENTS.md` exists and keeps Codex guidance out of Cursor `.mdc` files.
+- [ ] `.github/workflows/mirror-rules.yml` mirrors `.cursor/rules/**`, `.cursor/skills/**`, `AGENTS.md`, nested `AGENTS*.md`, `.codex/rules/**`, and `CLAUDE.md` into the matching `vibecoding/projects/issue-tracker/` harness folders.
+- [ ] If `VIBECODING_MIRROR_TOKEN` is missing or a mirror run fails, the issue records the blocker and GitHub Actions run URL.
+- [ ] V1 scope lock issue explicitly excludes React/Next.js, full GitHub sync, automatic full markdown migration, drag/drop planning, and multi-user roles.
+- [ ] Container-only development issue documents that normal setup requires Docker/Compose and does not require host `pip install`, a host virtualenv, host PostgreSQL, or host Alembic.
+- [ ] Compose provides an app service usable for `pytest`, Alembic, import/export commands, and MCP smoke tests through `docker compose run --rm app ...`.
 - [ ] Root contains only unavoidable metadata: `README.md`, `pyproject.toml`, `.gitignore`, and `.env.example`.
 - [ ] Compose files live under `deployment/` and do not require `sudo`.
 - [ ] `.env.example` contains placeholders only for `DATABASE_URL`, `APP_SECRET_KEY`, `APP_BASE_URL`, `ADMIN_USERNAME`, `SESSION_COOKIE_SECURE`, `MCP_ENABLED`, and `LOG_LEVEL`.
 - [ ] No `.env`, passwords, tokens, logs, database dumps, backups, or generated artifacts are added.
-- [ ] `python -m pytest tests/` runs, even if it only covers the health/app bootstrap path.
+- [ ] Containerized `python -m pytest tests/` runs through the app service, even if it only covers the health/app bootstrap path.
 
 Category gates:
 - `IT-6` Deployment And Configuration Drift: Verify compose files, env vars, health checks, explicit migrations, and workflow behavior stay aligned.
 - `IT-5` Auth And Secret Safety: Verify password hashing, session flags, setup flow, secret handling, and no credential logging.
 
 Validation commands:
-- `python -m pytest tests/`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/`
 - `docker compose -f deployment/docker-compose.local.yml config`
 
 STOP:
-- Stop after the package imports, the minimal tests pass, compose config validates, and any missing database health behavior is recorded for Sprint 1.
+- Stop only after the package imports, the minimal tests pass, compose config validates, and any missing database health behavior is recorded for Sprint 0002. If validation fails, iterate according to the Sprint Execution Standard before stopping.
 
-### Sprint 1: Schema, Migrations, Repositories, And Core Services
+### Sprint 0002: Schema, Migrations, Repositories, And Core Services
 
 Goal: create the durable PostgreSQL schema and service-layer invariants before any UI or MCP wiring depends on them.
 
@@ -250,13 +295,18 @@ Scope:
 - Add the single central Alembic setup in `migrations/` and one reviewed initial migration.
 - Add repositories for project, issue, sprint, category, dependency, and issue-log persistence.
 - Add services for project-scoped sequence allocation, issue create/update/close, sprint create/close, dependency add/remove with cycle rejection, and category checklist lookup.
+- Create and close the schema invariant issue before web or MCP work starts.
+- Create and close the project-scoped category binding issue, including tests that prove peer taxonomies are not hardcoded.
+- Create the explicit migration runbook issue and keep it open until the migration command is documented in Sprint 0005 if the guide does not exist yet.
 
 Acceptance criteria:
-- [ ] `alembic upgrade head` succeeds against an empty PostgreSQL database.
+- [ ] `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head` succeeds against an empty PostgreSQL database.
 - [ ] Database constraints reject duplicate project-local issue or sprint sequence IDs, self-dependencies, and invalid status values where PostgreSQL can enforce them safely.
 - [ ] Service tests prove sequence allocation, issue status transitions, sprint lifecycle transitions, dependency cycle rejection, category binding, and immutable close metadata.
 - [ ] Repositories are the only layer composing SQLAlchemy persistence queries.
 - [ ] Web routes and MCP tools are not introduced in this sprint except for any existing health endpoint adjustments.
+- [ ] Tests prove categories are project-scoped records and application logic does not require weather-app, investments, storyteller, or other peer category names.
+- [ ] Initial migration is reviewed for accidental drops, type churn, and unrelated schema changes before it is accepted.
 
 Category gates:
 - `IT-1` Tracker State Integrity: Verify project-local sequence allocation, status transitions, dependency cycle rejection, and immutable close metadata.
@@ -264,13 +314,13 @@ Category gates:
 - `IT-3` Schema And Migration Safety: Verify SQLAlchemy models, PostgreSQL constraints, and Alembic migrations agree; run migration checks on an empty database.
 
 Validation commands:
-- `python -m pytest tests/unit tests/integration`
-- `alembic upgrade head`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/unit tests/integration`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head`
 
 STOP:
-- Stop after schema, repositories, services, and tests pass; do not start web form or MCP tool wiring in the same prompt.
+- Stop only after schema, repositories, services, migrations, and tests pass; do not start web form or MCP tool wiring in the same prompt. If validation fails, iterate according to the Sprint Execution Standard before stopping.
 
-### Sprint 2: Authenticated Web MVP
+### Sprint 0003: Authenticated Web MVP
 
 Goal: provide the smallest server-rendered web flow that can manage projects, issues, dependencies, sprints, and close metadata through the service layer.
 
@@ -295,12 +345,12 @@ Category gates:
 - `IT-5` Auth And Secret Safety: Verify password hashing, session flags, setup flow, secret handling, and no credential logging.
 
 Validation commands:
-- `python -m pytest tests/unit tests/integration`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/unit tests/integration`
 
 STOP:
-- Stop after the tested web MVP supports the full issue-to-sprint-to-close path; leave import/export and MCP for later sprints.
+- Stop only after the tested web MVP supports the full issue-to-sprint-to-close path; leave import/export and MCP for later sprints. If validation fails, iterate according to the Sprint Execution Standard before stopping.
 
-### Sprint 3: MCP MVP
+### Sprint 0004: MCP MVP
 
 Goal: expose compact stdio MCP tools backed by the same services as the web app.
 
@@ -311,6 +361,7 @@ Scope:
 - Implement `project.list`, `issue.create`, `issue.get`, `issue.search`, `issue.update_status`, `issue.add_dependency`, `sprint.create`, `sprint.add_issue`, `sprint.get`, `category.list`, and `next_action`.
 - Add explicit input schemas, compact default outputs, filters/limits on list tools, and opt-in full detail by ID.
 - Ensure stdio protocol messages are never polluted by logs on stdout.
+- Create and close the MCP contract and parity issue before adding any extra MCP tools beyond the initial MVP list.
 
 Acceptance criteria:
 - [ ] MCP tools call the same service functions as the web routes for equivalent operations.
@@ -318,19 +369,20 @@ Acceptance criteria:
 - [ ] Full issue content, acceptance criteria, and history are returned only when explicitly requested by ID.
 - [ ] Mutating tools return structured IDs, status, and next-step hints without dumping full records.
 - [ ] MCP startup smoke test passes and tests cover compact output shape plus validation errors.
+- [ ] Tests fail if a list/search tool returns unbounded history, full acceptance criteria, or full issue bodies by default.
 
 Category gates:
 - `IT-1` Tracker State Integrity: Verify project-local sequence allocation, status transitions, dependency cycle rejection, and immutable close metadata.
 - `IT-4` MCP Contract And Token Discipline: Verify tool schemas, compact default outputs, limit/filter parameters, opt-in detail, and stderr-only logging.
 
 Validation commands:
-- `python -m pytest tests/unit tests/integration`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/unit tests/integration`
 - MCP server startup smoke test command documented by the implementation prompt.
 
 STOP:
-- Stop after tested MCP tools can create, search, get, update, and plan next action for issues without verbose default payloads.
+- Stop only after tested MCP tools can create, search, get, update, and plan next action for issues without verbose default payloads. If validation fails, iterate according to the Sprint Execution Standard before stopping.
 
-### Sprint 4: Import, Export, Documentation, And Backup Safety
+### Sprint 0005: Import, Export, Documentation, And Backup Safety
 
 Goal: make the MVP operable and recoverable without widening product scope into full GitHub sync or automatic markdown migration.
 
@@ -341,13 +393,16 @@ Scope:
 - Add JSON export for projects, issues, sprints, dependencies, categories, issue logs, and linked PRs.
 - Document local development, explicit migrations, external PostgreSQL deployment, MCP configuration, import/export, and backup/restore in `documentation/guides/`.
 - Keep generated exports and backups in ignored folders.
+- Close the explicit migration runbook issue if it remained open after Sprint 0002.
 
 Acceptance criteria:
 - [ ] Import requires an explicit target project and category mapping when source categories are present.
 - [ ] Export writes valid JSON without secrets, session data, password hashes, or environment values.
 - [ ] Import/export tests cover a minimal project with issues, acceptance criteria, dependency edges, sprint membership, categories, and linked PR metadata.
 - [ ] Guides include exact local startup, migration, MCP setup, and backup/restore commands.
+- [ ] Guides show containerized commands for tests, migrations, import/export, and MCP smoke checks; they do not instruct users to install Python dependencies directly on the host.
 - [ ] Generated export and backup paths are ignored by git.
+- [ ] Migration docs make clear that production or external PostgreSQL migrations are explicit commands, not hidden startup side effects.
 
 Category gates:
 - `IT-2` Category And AC Binding: Verify acceptance criteria are required, category checklists are inlined when applicable, and project taxonomies remain project-scoped data.
@@ -355,13 +410,13 @@ Category gates:
 - `IT-6` Deployment And Configuration Drift: Verify compose files, env vars, health checks, explicit migrations, and workflow behavior stay aligned.
 
 Validation commands:
-- `python -m pytest tests/unit tests/integration`
-- `alembic upgrade head`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/unit tests/integration`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head`
 
 STOP:
-- Stop after backup/import/export behavior is documented and tested; do not add full GitHub synchronization.
+- Stop only after backup/import/export behavior is documented and tested; do not add full GitHub synchronization. If validation fails, iterate according to the Sprint Execution Standard before stopping.
 
-### Sprint 5: MVP Hardening And Release Gate
+### Sprint 0006: MVP Hardening And Release Gate
 
 Goal: verify the end-to-end MVP from fresh checkout through Docker health, web workflow, MCP workflow, and CI checks.
 
@@ -372,14 +427,17 @@ Scope:
 - Add startup diagnostics and final health behavior for app plus database.
 - Add browser or route-level smoke coverage only where simple route tests no longer prove the user-facing flow.
 - Review docs, `.gitignore`, generated artifacts, and secret safety before tagging the MVP as ready.
+- Create and close the fresh-checkout release rehearsal issue before marking MVP ready.
 
 Acceptance criteria:
 - [ ] Fresh clone setup docs can start local PostgreSQL and the app with documented commands.
-- [ ] `alembic upgrade head` applies cleanly to an empty PostgreSQL database.
+- [ ] Containerized `alembic upgrade head` applies cleanly to an empty PostgreSQL database.
 - [ ] Docker local stack reaches `/health` and verifies database connectivity.
 - [ ] Admin can complete the web MVP path: setup/login, project, issue, dependency, sprint, close, issue log.
 - [ ] MCP can complete the MVP agent path: project list, issue create/search/get/update, dependency add, sprint create/add/get, next action.
 - [ ] CI runs lint/tests and a Docker build without committing secrets or large generated files.
+- [ ] Release rehearsal starts from a clean checkout and does not depend on local-only `.env`, caches, database dumps, generated exports, or uncommitted files.
+- [ ] Release rehearsal does not require host Python package installation, host virtualenv activation, or host PostgreSQL.
 
 Category gates:
 - `IT-1` Tracker State Integrity: Verify project-local sequence allocation, status transitions, dependency cycle rejection, and immutable close metadata.
@@ -388,13 +446,13 @@ Category gates:
 - `IT-6` Deployment And Configuration Drift: Verify compose files, env vars, health checks, explicit migrations, and workflow behavior stay aligned.
 
 Validation commands:
-- `python -m pytest tests/`
-- `alembic upgrade head`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/`
+- `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head`
 - `docker compose -f deployment/docker-compose.local.yml up --build`
-- `python -c "import yaml; yaml.safe_load(open('.github/workflows/mirror-rules.yml'))"` if workflows changed
+- `docker compose -f deployment/docker-compose.local.yml run --rm app python -c "import yaml; yaml.safe_load(open('.github/workflows/mirror-rules.yml'))"` if workflows changed
 
 STOP:
-- Stop after all MVP gates pass and record any remaining non-MVP backlog items instead of expanding this release.
+- Stop only after all MVP gates pass and record any remaining non-MVP backlog items instead of expanding this release. If validation fails, iterate according to the Sprint Execution Standard before stopping.
 
 ## Testing Plan
 
@@ -404,13 +462,16 @@ Use risk-scaled tests:
 - Web route tests for login, issue create/edit/close, sprint create/close, and dependency add/remove.
 - MCP tests for compact output shape and no accidental huge payloads.
 - Docker smoke test for local compose boot and health endpoint.
+- Run tests and migration checks inside the app container by default to avoid host dependency drift.
+- Treat a failing test or smoke check as part of the sprint work. Fix the implementation, test, fixture, or documented command, then rerun until the gate passes.
+- Do not skip integration, migration, MCP, or Docker checks because they are inconvenient. Skip only for a real external blocker, and record the exact blocker and next retry step.
 
 Acceptance gates for v1:
 - Fresh clone can start local Postgres and app using documented compose command.
 - Admin can log in, create a project, create issues, add dependencies, create a sprint, move issues through done, and view issue log entries.
 - MCP can create/search/get/update issues without returning verbose payloads by default.
 - No secrets are committed.
-- Migrations apply cleanly to an empty database.
+- Migrations apply cleanly to an empty database from inside the app container.
 
 ## Concerns And Recommendations
 
