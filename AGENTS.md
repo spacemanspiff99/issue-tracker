@@ -7,13 +7,25 @@ These instructions apply to the whole repository. They are for OpenAI Codex only
 - Issue Tracker is a FastAPI + Jinja + SQLAlchemy 2.x + Alembic + PostgreSQL application with a stdio MCP server backed by the same service layer.
 - Keep implementation under `src/issue_tracker/`, with web, MCP, domain, services, and repositories separated.
 - Keep Alembic migrations in the root `migrations/` folder. Do not add a second migration tree.
+- Keep docs in `documentation/`, deployment assets in `deployment/`, and root files limited to unavoidable project metadata.
 - Use the single `main` branch strategy unless the repository explicitly adopts another branch model. Prefer one behavior change per PR.
+
+## Harness And Model Guidance
+
+- Preserve harness boundaries: Cursor rules belong in `.cursor/rules/`, Codex project guidance belongs in `AGENTS.md`, Codex command approval policy belongs in `.codex/rules/*.rules`, and Claude Code memory belongs in `CLAUDE.md`.
+- Do not copy Codex/GPT model guidance into Cursor `.mdc` files unless Cursor behavior is intentionally changing too.
+- Prefer GPT-5.5 for Codex work when available; use GPT-5.4 as fallback and GPT-5.4-mini only for narrow, low-risk coding or delegated subagent work.
+- Use `medium` reasoning as the default starting point. Use `high` or `xhigh` for complex architecture, data integrity, auth, deployment, or MCP contract decisions.
+- When delegating to subagents, use GPT-5.5 with `high` reasoning when the subtask is complex, security-sensitive, schema-critical, deployment-critical, MCP-contract-sensitive, or likely to require difficult debugging. Use lighter models only for bounded mechanical subtasks with low blast radius.
+- Follow OpenAI Codex guidance: outcome-first instructions, explicit success criteria, allowed side effects, verification expectations, evidence rules, and clear stop conditions.
 
 ## Domain Rules
 
 - Web routes and MCP tools must call the same service-layer operations for issue, sprint, dependency, category, and issue-log behavior.
 - MCP tools should return compact summaries by default. Full issue text, acceptance criteria, and history should be opt-in by ID.
 - Do not duplicate lifecycle logic in templates, routes, and MCP tools.
+- Treat categories as project-scoped data. Do not hardcode peer project taxonomies from weather-app, investments, storyteller, or any other project.
+- Preserve the manual tracker ID convention: issues and sprints share one project-local `NNNN` sequence, displayed with four zero-padded digits.
 
 ## Issues, Prompts, And STOP Handoffs
 
@@ -40,9 +52,15 @@ These instructions apply to the whole repository. They are for OpenAI Codex only
 - Schema changes require an Alembic migration plus a check that `alembic upgrade head` works on an empty database.
 - Deployment is not verified until `/health` confirms database connectivity.
 - If a command is blocked because the project is not initialized yet, report the exact command and verify the files that do exist.
+- After code or guidance changes, run the smallest relevant validation command and report anything blocked.
 
-## Model And Evidence
+## Safety Boundaries
 
-- Prefer GPT-5.5 for Codex work when available; use GPT-5.4 as fallback and GPT-5.4-mini for narrow subagent work.
-- If the user explicitly asks for a model, use it when the environment supports it.
+- Do not commit secrets, `.env` files, local credentials, database dumps, backups, generated exports, or large local artifacts.
+- Do not run destructive commands such as `rm -rf`, `git reset --hard`, or force-push operations unless the user explicitly asks and confirms.
+- Do not edit mirrored guidance in `spacemanspiff99/vibecoding` by hand. Edit this source repository, then let the mirror workflow publish to vibecoding.
+
+## Evidence And Closeout
+
 - Final reports should name changed files, verification commands, blocked checks, and any remaining STOP handoff.
+- Do not claim a workflow works until it has been tested through the relevant surface: service tests, route tests, MCP tests, or Docker smoke tests.

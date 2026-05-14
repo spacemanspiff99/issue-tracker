@@ -17,4 +17,5 @@ This file owns the issue-tracker project's recurring bug taxonomy. Do not copy c
 
 | Date | Issue | Category | Root cause | Prevention added |
 |---|---|---|---|---|
+| 2026-04-25 | Manual tracker naming convention dropped during rules sync | `IT-2` | Initial issue-tracker rules adapted lifecycle gates but failed to preserve the vibecoding `NNNN` shared issue/sprint ID convention explicitly. | Added explicit issue/sprint naming rules to `.cursor/rules/agents.mdc`, reinforced the invariant in `.cursor/rules/core.mdc`, and updated the MVP sprint labels to `Sprint 0001` onward. |
 | 2026-04-24 | Initial taxonomy | n/a | New project rules need a project-owned category list. | Added `IT-1` through `IT-6` and wired them into `.cursor/rules/ac.mdc`. |

@@ -1,23 +1,18 @@
 name: Mirror AI guidance to vibecoding
 
-# Canonical template. Copy to .github/workflows/mirror-rules.yml in your sub-project,
-# then set PROJECT_NAME and on.push.branches for the target project.
-# See https://github.com/spacemanspiff99/vibecoding/blob/main/documentation/guides/RULES_SYNC_GUIDE.md Sections 12-13.
-
 on:
   push:
     branches:
-      # issue-tracker uses main
       - main
     paths:
-      - '.cursor/rules/**'
-      - '.cursor/skills/**'
-      - '.codex/rules/**'
-      - 'AGENTS.md'
-      - '**/AGENTS.md'
-      - '**/AGENTS.override.md'
-      - 'CLAUDE.md'
-      - '.github/workflows/mirror-rules.yml'
+      - ".cursor/rules/**"
+      - ".cursor/skills/**"
+      - ".codex/rules/**"
+      - "AGENTS.md"
+      - "**/AGENTS.md"
+      - "**/AGENTS.override.md"
+      - "CLAUDE.md"
+      - ".github/workflows/mirror-rules.yml"
   workflow_dispatch: {}
 
 concurrency:
@@ -31,7 +26,6 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     env:
-      # issue-tracker: subfolder is issue-tracker/cursor-rules
       PROJECT_NAME: issue-tracker
     steps:
       - name: Check out source repo
@@ -55,10 +49,10 @@ jobs:
           CODEX_DEST="vibecoding/projects/${PROJECT_NAME}/codex-guidance"
           CLAUDE_DEST="vibecoding/projects/${PROJECT_NAME}/claude-memory"
           mkdir -p "${RULE_DEST}" "${SKILL_DEST}" "${CODEX_DEST}" "${CLAUDE_DEST}"
-          find "${RULE_DEST}" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} +
-          find "${SKILL_DEST}" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} +
-          find "${CODEX_DEST}" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} +
-          find "${CLAUDE_DEST}" -mindepth 1 -maxdepth 1 ! -name '.gitkeep' -exec rm -rf {} +
+          find "${RULE_DEST}" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exec rm -rf {} +
+          find "${SKILL_DEST}" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exec rm -rf {} +
+          find "${CODEX_DEST}" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exec rm -rf {} +
+          find "${CLAUDE_DEST}" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exec rm -rf {} +
           if [ -d source/.cursor/rules ]; then
             cp -a source/.cursor/rules/. "${RULE_DEST}/"
           else
@@ -90,7 +84,7 @@ jobs:
           if [ -f source/CLAUDE.md ]; then
             cp source/CLAUDE.md "${CLAUDE_DEST}/CLAUDE.md"
           fi
-          cat > "vibecoding/projects/${PROJECT_NAME}/cursor-rules/.mirror-source.json" <<EOF
+          cat > "${RULE_DEST}/.mirror-source.json" <<EOF
           {
             "project": "${PROJECT_NAME}",
             "source_repo": "${GITHUB_REPOSITORY}",
@@ -101,18 +95,15 @@ jobs:
             "mirrored_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
-          cp "vibecoding/projects/${PROJECT_NAME}/cursor-rules/.mirror-source.json" \
-             "vibecoding/projects/${PROJECT_NAME}/cursor-skills/.mirror-source.json"
-          cp "vibecoding/projects/${PROJECT_NAME}/cursor-rules/.mirror-source.json" \
-             "vibecoding/projects/${PROJECT_NAME}/codex-guidance/.mirror-source.json"
-          cp "vibecoding/projects/${PROJECT_NAME}/cursor-rules/.mirror-source.json" \
-             "vibecoding/projects/${PROJECT_NAME}/claude-memory/.mirror-source.json"
+          cp "${RULE_DEST}/.mirror-source.json" "${SKILL_DEST}/.mirror-source.json"
+          cp "${RULE_DEST}/.mirror-source.json" "${CODEX_DEST}/.mirror-source.json"
+          cp "${RULE_DEST}/.mirror-source.json" "${CLAUDE_DEST}/.mirror-source.json"
 
       - name: Commit and push
         working-directory: vibecoding
         run: |
           set -euo pipefail
-          git config user.name  "vibecoding-mirror[bot]"
+          git config user.name "vibecoding-mirror[bot]"
           git config user.email "vibecoding-mirror@users.noreply.github.com"
           git add "projects/${PROJECT_NAME}/cursor-rules" \
                   "projects/${PROJECT_NAME}/cursor-skills" \
@@ -124,9 +115,9 @@ jobs:
           fi
           SHORT_SHA="${GITHUB_SHA:0:7}"
           git commit -m "chore(mirror): sync ${PROJECT_NAME} AI guidance @ ${SHORT_SHA}" \
-                     -m "Source: ${GITHUB_REPOSITORY}@${GITHUB_SHA}" \
-                     -m "Actor: ${GITHUB_ACTOR}" \
-                     -m "Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            -m "Source: ${GITHUB_REPOSITORY}@${GITHUB_SHA}" \
+            -m "Actor: ${GITHUB_ACTOR}" \
+            -m "Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           for attempt in 1 2 3; do
             if git push origin HEAD:main; then
               exit 0

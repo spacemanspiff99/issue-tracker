@@ -48,6 +48,13 @@ Every implementation prompt should include:
 - Do not hardcode this repository's categories as global constants. The app must allow each tracked project to define its own taxonomy.
 - When implementing MCP tools, optimize for the agent use case: concise outputs, stable IDs, filters, and opt-in detail.
 
+## Issue And Sprint Naming
+
+- Issues and sprints share one project-scoped sequence counter displayed as `NNNN`, four digits, zero-padded from `0001`.
+- Use `Issue 0001`, `Sprint 0002`, and file-style slugs like `0001-kebab-slug`; do not use unpadded labels such as `Issue 1` or `Sprint 0`.
+- Sprint task prompts use per-sprint two-digit sequencing: `tasks/NN-kebab-slug__model.md`, for example `tasks/01-schema__sonnet.md`.
+- When replacing markdown trackers with database state, preserve this numbering convention in UI, MCP outputs, imports, exports, prompts, and planning docs.
+
 ## STOP Protocol
 
 Before declaring a task complete:
