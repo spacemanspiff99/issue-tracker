@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<p><a href="/projects/{{ sprint.project_id }}">Project</a></p>
+<h1>Sprint {{ display_id(sprint.sequence) }}: {{ sprint.goal }}</h1>
+<p>Status: {{ sprint.status.value }}</p>
+<form method="post" action="/sprints/{{ sprint.id }}/issues" class="row">
+  <label>Backlog issue
+    <select name="issue_id">
+      {% for issue in backlog %}
+      <option value="{{ issue.id }}">{{ display_id(issue.sequence) }} {{ issue.title }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Add issue</button>
+</form>
+<table>
+  <tr><th>Issue</th><th>Phase</th><th>Status</th></tr>
+  {% for membership in memberships %}
+  <tr><td>{{ membership.issue.title }}</td><td>{{ membership.phase or "" }}</td><td>{{ membership.status.value }}</td></tr>
+  {% endfor %}
+</table>
+<form method="post" action="/sprints/{{ sprint.id }}/close"><button type="submit">Close sprint</button></form>
+{% endblock %}

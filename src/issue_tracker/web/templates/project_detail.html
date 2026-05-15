@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block body %}
+<p><a href="/">Projects</a></p>
+<h1>{{ project.name }}</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<h2>Create issue</h2>
+<form method="post" action="/projects/{{ project.id }}/issues">
+  <label>Title <input name="title" required></label>
+  <label>Category
+    <select name="category_id">
+      <option value="">None</option>
+      {% for category in categories %}
+      <option value="{{ category.id }}">{{ category.key }} {{ category.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Acceptance criteria <textarea name="acceptance_criteria" required></textarea></label>
+  <button type="submit">Create issue</button>
+</form>
+<h2>Issues</h2>
+<table>
+  <tr><th>ID</th><th>Title</th><th>Status</th><th>Priority</th></tr>
+  {% for issue in issues %}
+  <tr>
+    <td>{{ display_id(issue.sequence) }}</td>
+    <td><a href="/issues/{{ issue.id }}">{{ issue.title }}</a></td>
+    <td>{{ issue.status.value }}</td>
+    <td>{{ issue.priority }}</td>
+  </tr>
+  {% endfor %}
+</table>
+<h2>Sprint</h2>
+<form method="post" action="/projects/{{ project.id }}/sprints" class="row">
+  <label>Goal <input name="goal" required></label>
+  <button type="submit">Create sprint</button>
+</form>
+<h2>Categories</h2>
+<form method="post" action="/projects/{{ project.id }}/categories">
+  <div class="row">
+    <label>Key <input name="key" required></label>
+    <label>Name <input name="name" required></label>
+  </div>
+  <label>Checklist <textarea name="checklist" required></textarea></label>
+  <button type="submit">Add category</button>
+</form>
+<ul>
+  {% for category in categories %}
+  <li>{{ category.key }}: {{ category.name }}</li>
+  {% endfor %}
+</ul>
+<h2>Issue log</h2>
+<ul>
+  {% for log in logs %}
+  <li>{{ log.root_cause }} <span class="muted">{{ log.prevention_added }}</span></li>
+  {% else %}
+  <li class="muted">No issue log entries yet.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

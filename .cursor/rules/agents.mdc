@@ -18,10 +18,12 @@ alwaysApply: true
 Every implementation prompt should include:
 
 - Problem statement and project context.
+- Recommended model and reasoning level.
 - Concrete file paths or modules to inspect first.
 - Acceptance criteria with pass/fail checks.
 - Required validation commands.
 - A `STOP` section naming what remains or the next prompt to run.
+- A short note confirming whether the active model/reasoning matches the recommendation.
 
 ## Micro-Task Principle
 
@@ -37,10 +39,17 @@ Every implementation prompt should include:
 
 ## Model Policy
 
-- Default to the workspace-approved latest Claude Sonnet model for routine implementation and review unless the user specifies a different model.
-- Escalate to Opus only for hard architecture tradeoffs, difficult debugging, or security-sensitive review.
-- Never select Composer 2 or Auto as the project default.
+- Default to GPT-5.5 `medium` for routine implementation, tests, documentation, and focused route/service changes when the environment supports it.
+- Escalate to GPT-5.5 `high` for architecture, schema and migration safety, auth and secret handling, deployment, MCP tool contracts, manual UAT readiness, difficult debugging, and release decisions.
+- Use GPT-5.4 only as a fallback when GPT-5.5 is unavailable. Use GPT-5.4-mini only for narrow, low-risk mechanical work with clear acceptance criteria.
+- Before starting an issue or prompt, compare the active model/reasoning to the recommendation. If they do not match, record the mismatch and either switch or explicitly accept the risk in the handoff.
 - When a user explicitly requests a model, follow that request if the environment supports it.
+
+## Sequential Role Review
+
+- For issue creation, sprint planning, and complex prompts, think through the work in sequential role passes rather than parallel personas.
+- Use project manager for scope and out-of-scope calls, engineering manager for task boundaries, backend/frontend engineer for implementation risk, DevOps for runtime and migration risk, and QA engineer for acceptance criteria.
+- Include only the roles that materially apply to the task.
 
 ## Issue Tracker Dogfooding
 
@@ -63,6 +72,12 @@ Before declaring a task complete:
 - Run the relevant tests or explain why they could not run.
 - Confirm no secrets, `.env` files, database dumps, logs, or large generated files were added.
 - State the next smallest useful step if the work is not fully complete.
+
+## Local Manual UAT Readiness
+
+- Do not claim local manual UAT is ready until a fresh container build, explicit `alembic upgrade head`, pytest gate, `/health` database check, setup/login path, project/issue/dependency/sprint/close path, and UAT notes location are all verified or explicitly listed as blockers.
+- UI-facing UAT checks must use a browser or equivalent route-level proof that pages are styled and usable. Absence of JavaScript errors is not sufficient.
+- Debug UAT failures from logs, runtime output, request/response bodies, and database state before changing code.
 
 ## Cross-References
 

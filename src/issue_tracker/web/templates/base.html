@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue Tracker</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; color: #17202a; }
+      main { max-width: 1000px; margin: 0 auto; }
+      input, textarea, select, button { font: inherit; margin: .25rem 0; padding: .45rem; }
+      textarea { width: 100%; min-height: 5rem; }
+      table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+      th, td { border-bottom: 1px solid #d8dee4; padding: .5rem; text-align: left; }
+      .error { color: #9b1c1c; font-weight: 600; }
+      .row { display: flex; gap: 1rem; align-items: end; flex-wrap: wrap; }
+      .muted { color: #667085; }
+    </style>
+  </head>
+  <body>
+    <main>
+      {% block body %}{% endblock %}
+    </main>
+  </body>
+</html>

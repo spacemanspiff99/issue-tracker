@@ -12,6 +12,7 @@ alwaysApply: false
 - Commit `.env.example` with placeholders only. Never commit `.env`, database dumps, backups, tokens, passwords, or real connection strings.
 - Required settings include `DATABASE_URL`, `APP_SECRET_KEY`, `APP_BASE_URL`, `ADMIN_USERNAME`, `SESSION_COOKIE_SECURE`, `MCP_ENABLED`, and `LOG_LEVEL`.
 - If first-run setup supports `ADMIN_INITIAL_PASSWORD`, it must be one-time use and never logged.
+- Do not install missing host packages, CLIs, package-manager dependencies, or system tools from an agent session. If a required tool is missing, stop and ask the user to install or authenticate it manually, then continue after they confirm it is ready.
 
 ## Docker Compose
 
@@ -40,6 +41,7 @@ alwaysApply: false
 
 - This project mirrors `.cursor/rules/` to `spacemanspiff99/vibecoding` after rules changes land on `main`.
 - The vibecoding path is `projects/issue-tracker/cursor-rules/`.
+- This repository is the authoritative source for issue-tracker rules and guidance. Vibecoding receives mirrored guidance only.
 - The mirror is one-way from this project to vibecoding. Never edit mirrored rule content in vibecoding by hand.
 - The GitHub secret must be named `VIBECODING_MIRROR_TOKEN` and scoped only to vibecoding contents read/write.
 

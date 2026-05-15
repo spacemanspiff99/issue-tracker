@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: issue_tracker
+      POSTGRES_USER: issue_tracker
+      POSTGRES_PASSWORD: issue_tracker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U issue_tracker -d issue_tracker"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - issue_tracker_pgdata:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://issue_tracker:issue_tracker@postgres:5432/issue_tracker
+      APP_SECRET_KEY: local-dev-change-me
+      APP_BASE_URL: http://localhost:8000
+      ADMIN_USERNAME: admin
+      ADMIN_INITIAL_PASSWORD: ""
+      SESSION_COOKIE_SECURE: "false"
+      MCP_ENABLED: "true"
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../src:/app/src
+      - ../tests:/app/tests
+      - ../migrations:/app/migrations
+      - ../documentation:/app/documentation
+
+volumes:
+  issue_tracker_pgdata:

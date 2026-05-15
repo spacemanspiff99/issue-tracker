@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block body %}
+<p><a href="/projects/{{ issue.project_id }}">Project</a></p>
+<h1>Issue {{ display_id(issue.sequence) }}: {{ issue.title }}</h1>
+<p>Status: {{ issue.status.value }}</p>
+<p>{{ issue.summary or "" }}</p>
+<h2>Acceptance criteria</h2>
+<pre>{{ issue.acceptance_criteria }}</pre>
+<h2>Dependencies</h2>
+<form method="post" action="/issues/{{ issue.id }}/dependencies" class="row">
+  <label>Blocker issue ID <input name="blocker_issue_id" type="number" required></label>
+  <button type="submit">Add blocker</button>
+</form>
+<ul>
+  {% for dependency in dependencies %}
+  <li>{{ dependency.blocker_issue_id }} blocks {{ dependency.blocked_issue_id }}</li>
+  {% endfor %}
+</ul>
+<h2>Close</h2>
+<form method="post" action="/issues/{{ issue.id }}/close">
+  <label>Originating LLM <input name="originating_llm" required></label>
+  <label>Close note <textarea name="close_note"></textarea></label>
+  <button type="submit">Close issue</button>
+</form>
+{% endblock %}

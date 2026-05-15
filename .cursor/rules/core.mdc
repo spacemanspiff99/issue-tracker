@@ -22,6 +22,8 @@ Load these rules by task shape:
 - Keep implementation in `src/issue_tracker/`; use `src/issue_tracker/web/`, `src/issue_tracker/mcp/`, `src/issue_tracker/domain/`, `src/issue_tracker/services/`, and `src/issue_tracker/repositories/`.
 - Keep Alembic migrations in the single central `migrations/` folder. Do not create another migration folder.
 - Keep docs in `documentation/`; planning docs live in `documentation/planning/`, architecture in `documentation/architecture/`, guides in `documentation/guides/`, and standards in `documentation/standards/`.
+- Do not create orphan documentation. New docs must be linked from the relevant planning doc, guide index, README section, issue, sprint, or another discoverable document.
+- Do not create orphan rules or guidance. New rule files must be referenced from `AGENTS.md`, this rule index, the mirror workflow, or the relevant harness entrypoint.
 - Keep deployment files in `deployment/`; root may contain only unavoidable metadata such as `README.md`, `pyproject.toml`, `.gitignore`, and `.env.example`.
 - Use a single `main` branch strategy unless the repository explicitly adopts another branch model.
 - Do not import any peer project's category taxonomy. This project owns its taxonomy in `documentation/standards/ISSUE_LOG.md`.
@@ -54,6 +56,7 @@ Load these rules by task shape:
 - Search the repo before creating a folder; reuse existing locations.
 - Do not create loose implementation files in the root.
 - Do not create duplicate database migration folders.
+- Do not leave standalone guidance files without a reader path from the repo root or rule index.
 - Put generated exports, backups, logs, and local test artifacts under ignored folders.
 
 ## Security
