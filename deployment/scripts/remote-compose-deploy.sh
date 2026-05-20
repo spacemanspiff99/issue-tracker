@@ -56,6 +56,15 @@ ssh "${ssh_opts[@]}" "$remote" \
    if [ '$skip_db_backup' != '1' ]; then
      mkdir -p '$deploy_path/backups/$release_id'
      docker compose -f '$compose_file' up -d postgres
+     for attempt in 1 2 3 4 5 6 7 8 9 10; do
+       if docker compose -f '$compose_file' exec -T postgres pg_isready -U issue_tracker -d issue_tracker; then
+         break
+       fi
+       if [ \"\$attempt\" = 10 ]; then
+         exit 1
+       fi
+       sleep 3
+     done
      docker compose -f '$compose_file' exec -T postgres pg_dump \
        -U issue_tracker \
        -d issue_tracker \
