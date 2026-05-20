@@ -1,0 +1,93 @@
+name: Local Dev UAT Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      current_dev_host:
+        description: Current dev host
+        required: true
+        default: 192.168.10.20
+      uat_host:
+        description: UAT host
+        required: true
+        default: 192.168.10.18
+      dev_host:
+        description: Downstream dev host
+        required: true
+        default: 192.168.10.8
+      deploy_user:
+        description: SSH user on target hosts
+        required: true
+        default: akun
+      deploy_path:
+        description: Remote deployment path
+        required: true
+        default: /home/akun/issue-tracker
+      promote_dev:
+        description: Deploy to downstream dev after UAT passes
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-dev-uat-dev
+  cancel-in-progress: false
+
+jobs:
+  verify-current-dev:
+    name: Verify Current Dev
+    runs-on: [self-hosted, issue-tracker, local-dev]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify on current dev host
+        env:
+          TARGET_HOST: ${{ inputs.current_dev_host }}
+          TARGET_USER: ${{ inputs.deploy_user }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          APP_BASE_URL: http://${{ inputs.current_dev_host }}:8000
+          APP_HTTP_PORT: "8000"
+          RUN_BROWSER_UAT: "0"
+          RUN_TESTS: "1"
+          RUN_RUFF: "1"
+          SKIP_DB_BACKUP: "1"
+        run: bash deployment/scripts/remote-compose-deploy.sh
+
+  deploy-uat:
+    name: Deploy UAT
+    runs-on: [self-hosted, issue-tracker, local-dev]
+    needs: verify-current-dev
+    environment: uat
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to UAT
+        env:
+          TARGET_HOST: ${{ inputs.uat_host }}
+          TARGET_USER: ${{ inputs.deploy_user }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          APP_BASE_URL: http://${{ inputs.uat_host }}:8000
+          APP_HTTP_PORT: "8000"
+          RUN_BROWSER_UAT: "1"
+          SKIP_DB_BACKUP: "0"
+        run: bash deployment/scripts/remote-compose-deploy.sh
+
+  deploy-dev:
+    name: Promote To Dev
+    runs-on: [self-hosted, issue-tracker, local-dev]
+    needs: deploy-uat
+    if: ${{ inputs.promote_dev }}
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to downstream dev
+        env:
+          TARGET_HOST: ${{ inputs.dev_host }}
+          TARGET_USER: ${{ inputs.deploy_user }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          APP_BASE_URL: http://${{ inputs.dev_host }}:8000
+          APP_HTTP_PORT: "8000"
+          RUN_BROWSER_UAT: "0"
+          SKIP_DB_BACKUP: "0"
+        run: bash deployment/scripts/remote-compose-deploy.sh
