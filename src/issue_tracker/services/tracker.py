@@ -49,6 +49,7 @@ class IssueSummary:
 
 class AuthService:
     def __init__(self, session: Session):
+        self.session = session
         self.repo = Repository(session)
 
     def setup_admin(self, username: str, password_hash: str) -> User:
@@ -56,6 +57,11 @@ class AuthService:
             raise DomainError("Admin user is already configured")
         user = User(username=username.strip(), password_hash=password_hash)
         self.repo.add(user)
+        try:
+            self.session.commit()
+        except IntegrityError as exc:
+            self.session.rollback()
+            raise DomainError("Admin user violates a unique constraint") from exc
         return user
 
     def get_user(self, username: str) -> User | None:

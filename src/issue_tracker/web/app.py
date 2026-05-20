@@ -56,13 +56,13 @@ def create_app() -> FastAPI:
             return RedirectResponse("/setup", status_code=HTTP_303_SEE_OTHER)
         require_user(request, session)
         projects = ProjectService(session).list_projects()
-        return templates.TemplateResponse("projects.html", {"request": request, "projects": projects})
+        return templates.TemplateResponse(request, "projects.html", {"request": request, "projects": projects})
 
     @app.get("/setup", response_class=HTMLResponse)
     def setup_form(request: Request, session: Session = Depends(get_session)):
         if not AuthService(session).setup_required():
             return RedirectResponse("/login", status_code=HTTP_303_SEE_OTHER)
-        return templates.TemplateResponse("setup.html", {"request": request, "error": None})
+        return templates.TemplateResponse(request, "setup.html", {"request": request, "error": None})
 
     @app.post("/setup", response_class=HTMLResponse)
     def setup_post(
@@ -74,13 +74,13 @@ def create_app() -> FastAPI:
         try:
             AuthService(session).setup_admin(username, hash_password(password))
         except DomainError as exc:
-            return templates.TemplateResponse("setup.html", {"request": request, "error": str(exc)}, status_code=400)
+            return templates.TemplateResponse(request, "setup.html", {"request": request, "error": str(exc)}, status_code=400)
         request.session["username"] = username
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
     @app.get("/login", response_class=HTMLResponse)
     def login_form(request: Request):
-        return templates.TemplateResponse("login.html", {"request": request, "error": None})
+        return templates.TemplateResponse(request, "login.html", {"request": request, "error": None})
 
     @app.post("/login", response_class=HTMLResponse)
     def login_post(
@@ -91,13 +91,13 @@ def create_app() -> FastAPI:
     ):
         if login_limited(username):
             return templates.TemplateResponse(
-                "login.html", {"request": request, "error": "Too many attempts"}, status_code=429
+                request, "login.html", {"request": request, "error": "Too many attempts"}, status_code=429
             )
         user = AuthService(session).get_user(username)
         if user is None or not verify_password(password, user.password_hash):
             note_failed_login(username)
             return templates.TemplateResponse(
-                "login.html", {"request": request, "error": "Invalid login"}, status_code=400
+                request, "login.html", {"request": request, "error": "Invalid login"}, status_code=400
             )
         clear_failed_login(username)
         request.session["username"] = user.username
@@ -130,6 +130,7 @@ def create_app() -> FastAPI:
         categories = CategoryService(session).list_categories(project_id)
         logs = IssueLogService(session).list_entries(project_id)
         return templates.TemplateResponse(
+            request,
             "project_detail.html",
             {
                 "request": request,
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
             categories = CategoryService(session).list_categories(project_id)
             logs = IssueLogService(session).list_entries(project_id)
             return templates.TemplateResponse(
+                request,
                 "project_detail.html",
                 {
                     "request": request,
@@ -191,7 +193,7 @@ def create_app() -> FastAPI:
         issue = IssueService(session).get_issue(issue_id)
         dependencies = Repository(session).list_dependencies_for_issue(issue_id)
         return templates.TemplateResponse(
-            "issue_detail.html", {"request": request, "issue": issue, "dependencies": dependencies}
+            request, "issue_detail.html", {"request": request, "issue": issue, "dependencies": dependencies}
         )
 
     @app.post("/issues/{issue_id}/close")
@@ -238,6 +240,7 @@ def create_app() -> FastAPI:
         memberships = Repository(session).list_sprint_issues(sprint_id)
         backlog = IssueService(session).search(project_id=sprint.project_id, status="backlog", limit=50)
         return templates.TemplateResponse(
+            request,
             "sprint_detail.html",
             {"request": request, "sprint": sprint, "memberships": memberships, "backlog": backlog},
         )
