@@ -13,7 +13,8 @@ run_tests="${RUN_TESTS:-0}"
 run_ruff="${RUN_RUFF:-0}"
 release_id="${GITHUB_SHA:-manual}-$(date -u +%Y%m%d%H%M%S)"
 remote="${target_user}@${target_host}"
-ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
+ssh_config_path="${DEPLOY_SSH_CONFIG_PATH:-/dev/null}"
+ssh_opts=(-F "$ssh_config_path" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
 if [ -n "${DEPLOY_SSH_KEY_PATH:-}" ]; then
   ssh_opts+=(-i "$DEPLOY_SSH_KEY_PATH" -o IdentitiesOnly=yes)
 fi
