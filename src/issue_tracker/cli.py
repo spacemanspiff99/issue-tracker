@@ -51,8 +51,8 @@ def export_json(session: Session, project_id: int, output: Path) -> None:
             for si in session.query(SprintIssue).join(Sprint).filter(Sprint.project_id == project_id).all()
         ],
         "issue_logs": [
-            {"root_cause": l.root_cause, "prevention_added": l.prevention_added}
-            for l in session.query(IssueLogEntry).filter_by(project_id=project_id).all()
+            {"root_cause": entry.root_cause, "prevention_added": entry.prevention_added}
+            for entry in session.query(IssueLogEntry).filter_by(project_id=project_id).all()
         ],
         "linked_prs": [
             {"repo": pr.repo, "url": pr.url, "merge_status": pr.merge_status}
