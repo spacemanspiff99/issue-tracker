@@ -146,7 +146,11 @@ ssh "${ssh_opts[@]}" "$remote" \
    done
    docker compose -f '$compose_file' run --rm app python -m issue_tracker.mcp.server --smoke
    if [ '$run_browser_uat' = '1' ]; then
-     docker compose -f '$compose_file' exec -e RUN_BROWSER_UAT=1 app python -m pytest tests/e2e/
+     if [ -d tests/e2e ]; then
+       docker compose -f '$compose_file' exec -e RUN_BROWSER_UAT=1 app python -m pytest tests/e2e/
+     else
+       echo 'Skipping browser UAT: tests/e2e/ is not present in this release'
+     fi
    fi"
 
 echo "Deployed $release_id to $remote:$deploy_path/current"
