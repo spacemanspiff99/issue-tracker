@@ -74,7 +74,9 @@ def create_app() -> FastAPI:
         try:
             AuthService(session).setup_admin(username, hash_password(password))
         except DomainError as exc:
-            return templates.TemplateResponse(request, "setup.html", {"request": request, "error": str(exc)}, status_code=400)
+            return templates.TemplateResponse(
+                request, "setup.html", {"request": request, "error": str(exc)}, status_code=400
+            )
         request.session["username"] = username
         return RedirectResponse("/", status_code=HTTP_303_SEE_OTHER)
 
