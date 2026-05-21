@@ -10,7 +10,7 @@ on:
       uat_host:
         description: UAT host
         required: true
-        default: 192.168.10.18
+        default: 192.168.10.26
       dev_host:
         description: Downstream dev host
         required: true
