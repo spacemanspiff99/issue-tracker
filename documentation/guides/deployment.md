@@ -50,28 +50,37 @@ The local runner pipeline creates a compressed custom-format `pg_dump` before mi
 
 Restore is intentionally manual. Inspect the target and use PostgreSQL tools such as `pg_restore` from a known-good backup; do not add automatic restore or rollback that could overwrite live data without human approval.
 
-## Local Runner Dev -> UAT -> Dev Pipeline
+## Local Runner UAT -> Production Pipeline
 
 Use `.github/workflows/local-pipeline.yml` for the local network pipeline:
 
-1. Verify the current self-hosted runner checkout with Docker build, Alembic, tests, MCP smoke, and ruff.
-2. Deploy the verified source tree to UAT at `akun@192.168.10.18`.
-3. Run UAT health, MCP smoke, and browser UAT on the UAT host.
-4. Optionally promote the same revision to downstream dev at `akun@192.168.10.8`.
+1. Deploy the checked-out source tree to UAT at `akun@app-uat` / `192.168.10.26`.
+2. Verify UAT with Docker build, pre-migration backup, Alembic, tests, ruff, `/health`, MCP smoke, and browser UAT.
+3. Optionally deploy the same revision to production at `akun@app-prod` / `192.168.10.27` after UAT passes.
+4. Verify production with pre-migration backup, Alembic, `/health`, and MCP smoke.
 
-The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker` and `local-dev`. The runner acts as an orchestrator and SSHes into the current dev host, UAT host, and downstream dev host; Docker does not need to be installed inside the runner LXC.
+The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker` and `local-dev`. The runner is container `113`, hostname `github-runner`. It acts as an orchestrator and SSHes into the UAT and production app hosts; Docker does not need to be installed inside the runner LXC.
 
 Runner-local SSH prerequisites:
 
-- The runner's existing `github` user SSH configuration can connect non-interactively to `akun@192.168.10.20`, `akun@192.168.10.18`, and `akun@192.168.10.8`.
+- The runner's existing `github` user SSH configuration can connect non-interactively to `akun@192.168.10.26` and `akun@192.168.10.27`.
 - Do not write issue-tracker-specific keys or config into `/home/github/.ssh/config`; that user is shared by other local repo runners.
 
 Target host prerequisites:
 
+- UAT host is VM `114`, hostname `app-uat`, IP `192.168.10.26`.
+- Production host is VM `119`, hostname `app-prod`, IP `192.168.10.27`.
 - Docker and Docker Compose plugin installed.
 - `akun` can run Docker commands.
 - SSH accepts the key stored in `LOCAL_DEPLOY_SSH_KEY`.
-- Port `8000` is reachable from the runner and from the browser used for UAT.
+- Port `8000` is reachable from the runner and from the browser used for UAT or production smoke checks.
+- `/home/akun/issue-tracker` exists and is writable by `akun`.
+
+Production configuration prerequisite:
+
+- Production must provide a separate uncommitted env file on `app-prod`, defaulting to `/home/akun/issue-tracker/prod.env`.
+- The prod env file must provide production values for `APP_SECRET_KEY`, `DATABASE_URL`, and `POSTGRES_PASSWORD`; set `POSTGRES_DB` and `POSTGRES_USER` there too if production does not use the defaults.
+- Do not copy the UAT env file to prod. Do not commit prod env values to Git.
 
 The workflow copies the checked-out source tree over SSH using `deployment/scripts/remote-compose-deploy.sh`. It excludes `.git`, local caches, `exports/`, and `backups/`; no local database dumps, generated backups, `.env` files, or credentials are copied. Each deployment lands under:
 
@@ -88,15 +97,22 @@ Pre-migration database dumps are written on the target host under:
 
 Run it from GitHub Actions with:
 
-- `uat_host`: `192.168.10.18`
-- `dev_host`: `192.168.10.8`
+- `uat_host`: `192.168.10.26`
+- `prod_host`: `192.168.10.27`
 - `deploy_user`: `akun`
 - `deploy_path`: `/home/akun/issue-tracker`
-- `promote_dev`: `false` for UAT-only, `true` to promote after UAT passes
+- `prod_env_file`: `/home/akun/issue-tracker/prod.env`
+- `deploy_prod`: `false` for UAT-only, `true` to deploy production after UAT passes
+
+The deploy script enforces environment-specific host checks:
+
+- UAT refuses to deploy unless `TARGET_HOST` is `192.168.10.26` and the remote hostname is `app-uat`.
+- Production refuses to deploy unless `TARGET_HOST` is `192.168.10.27`, the remote hostname is `app-prod`, `REMOTE_ENV_FILE` exists, and `APP_SECRET_KEY`, `DATABASE_URL`, and `POSTGRES_PASSWORD` are provided by that file.
+- Production refuses `SKIP_DB_BACKUP=1`.
 
 The remote app URLs are:
 
 ```text
-http://192.168.10.18:8000
-http://192.168.10.8:8000
+http://192.168.10.26:8000
+http://192.168.10.27:8000
 ```
