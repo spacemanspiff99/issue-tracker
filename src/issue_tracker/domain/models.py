@@ -237,6 +237,141 @@ class IssueLogEntry(Base):
     created_at: Mapped[datetime] = now_column()
 
 
+class GuidanceSource(Base):
+    __tablename__ = "guidance_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    repo_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    default_branch: Mapped[str] = mapped_column(String(120), default="main", nullable=False)
+    vibecoding_target_path: Mapped[str | None] = mapped_column(String(500))
+    tracked_paths: Mapped[dict[str, object]] = mapped_column(default=dict, nullable=False)
+    scan_status: Mapped[str] = mapped_column(String(80), default="not-scanned", nullable=False)
+    created_at: Mapped[datetime] = now_column()
+
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_guidance_sources_project_name"),)
+
+
+class GuidanceBranch(Base):
+    __tablename__ = "guidance_branches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("guidance_sources.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    commit_sha: Mapped[str | None] = mapped_column(String(80))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    scan_status: Mapped[str] = mapped_column(String(80), default="not-scanned", nullable=False)
+    scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("source_id", "name", name="uq_guidance_branches_source_name"),)
+
+
+class GuidanceSnapshot(Base):
+    __tablename__ = "guidance_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("guidance_sources.id", ondelete="CASCADE"))
+    branch_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    commit_sha: Mapped[str | None] = mapped_column(String(80))
+    path: Mapped[str] = mapped_column(String(600), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    scan_status: Mapped[str] = mapped_column(String(80), default="ok", nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(160))
+    scanned_at: Mapped[datetime] = now_column()
+
+    __table_args__ = (
+        UniqueConstraint("source_id", "branch_name", "path", "content_hash", name="uq_guidance_snapshot_hash"),
+    )
+
+
+class GuidanceDrift(Base):
+    __tablename__ = "guidance_drifts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("guidance_sources.id", ondelete="CASCADE"))
+    left_snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("guidance_snapshots.id", ondelete="SET NULL"))
+    right_snapshot_id: Mapped[int | None] = mapped_column(ForeignKey("guidance_snapshots.id", ondelete="SET NULL"))
+    path: Mapped[str] = mapped_column(String(600), nullable=False)
+    drift_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    severity: Mapped[str] = mapped_column(String(40), default="normal", nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    recommended_action: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(80), default="open", nullable=False)
+    created_at: Mapped[datetime] = now_column()
+
+
+class GuidanceSyncProposal(Base):
+    __tablename__ = "guidance_sync_proposals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    drift_id: Mapped[int | None] = mapped_column(ForeignKey("guidance_drifts.id", ondelete="SET NULL"))
+    issue_id: Mapped[int | None] = mapped_column(ForeignKey("issues.id", ondelete="SET NULL"))
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(80), default="draft", nullable=False)
+    owner: Mapped[str | None] = mapped_column(String(160))
+    verification_command: Mapped[str | None] = mapped_column(Text)
+    approval_text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = now_column()
+
+
+class GuidanceSyncRun(Base):
+    __tablename__ = "guidance_sync_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    proposal_id: Mapped[int | None] = mapped_column(ForeignKey("guidance_sync_proposals.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(80), nullable=False)
+    logs: Mapped[str | None] = mapped_column(Text)
+    pr_url: Mapped[str | None] = mapped_column(String(500))
+    branch_name: Mapped[str | None] = mapped_column(String(240))
+    commit_sha: Mapped[str | None] = mapped_column(String(80))
+    verification_status: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = now_column()
+
+
+class GuidanceAuditEntry(Base):
+    __tablename__ = "guidance_audit_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    actor: Mapped[str | None] = mapped_column(String(160))
+    related_type: Mapped[str | None] = mapped_column(String(80))
+    related_id: Mapped[int | None] = mapped_column(Integer)
+    details: Mapped[dict[str, object]] = mapped_column(default=dict, nullable=False)
+    created_at: Mapped[datetime] = now_column()
+
+
+class GuidanceIngestedEvent(Base):
+    __tablename__ = "guidance_ingested_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    repo: Mapped[str] = mapped_column(String(240), nullable=False)
+    branch: Mapped[str] = mapped_column(String(160), nullable=False)
+    commit_sha: Mapped[str] = mapped_column(String(80), nullable=False)
+    path_set_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(80), default="received", nullable=False)
+    created_at: Mapped[datetime] = now_column()
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "repo",
+            "branch",
+            "commit_sha",
+            "path_set_hash",
+            name="uq_guidance_event_dedupe",
+        ),
+    )
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 

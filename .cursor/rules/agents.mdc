@@ -8,7 +8,7 @@ alwaysApply: true
 
 ## Prompt Lifecycle
 
-- Execution prompts live in `documentation/prompts/` or inside issue/sprint planning folders if this repository later dogfoods its own tracker exports.
+- Execution prompts live in `documentation/prompts/`, issue/sprint planning folders, or a discoverable tracker issue/sprint that is mirrored by enough markdown context for review and recovery.
 - New prompts must name the rules to load: `core.mdc`, `agents.mdc`, `ac.mdc`, and any scoped rule matching the work.
 - A prompt is done only after code is implemented, relevant tests pass, docs are updated when behavior changes, and the next handoff is explicit.
 - Do not run a large prompt in the same chat that created it. Start a fresh chat when the prompt is intended as a long implementation handoff.
@@ -56,6 +56,9 @@ Every implementation prompt should include:
 - The product manages projects, issues, sprints, dependencies, categories, issue logs, and MCP tools. Treat these as first-class domain concepts.
 - Do not hardcode this repository's categories as global constants. The app must allow each tracked project to define its own taxonomy.
 - When implementing MCP tools, optimize for the agent use case: concise outputs, stable IDs, filters, and opt-in detail.
+- For this repository's own development, use the running tracker as the active board and keep `documentation/` as the durable Git-reviewed planning and handoff record.
+- Before starting work, reconcile the tracker issue/sprint and the relevant markdown plan or prompt. Add the missing side when active work exists only in one system and the context needs to survive local database reset.
+- At closeout, update tracker status/evidence and any markdown guidance, UAT notes, prompt, or sprint handoff that changed.
 
 ## Issue And Sprint Naming
 

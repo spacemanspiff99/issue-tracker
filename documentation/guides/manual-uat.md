@@ -14,12 +14,14 @@ Use this guide after the Docker runtime gate passes in `documentation/issues/000
 Commands:
 
 ```bash
-docker compose -f deployment/docker-compose.local.yml config
-docker compose -f deployment/docker-compose.local.yml build
-docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head
-docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml config
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml build
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/
 docker compose -f deployment/docker-compose.local.yml up
 ```
+
+Use the isolated `COMPOSE_PROJECT_NAME`, `POSTGRES_CONTAINER_NAME`, and `APP_HTTP_PORT` values for temporary-worktree preflight on the dev host. Check `http://192.168.10.20:8000/health` before and after the preflight so the live dev app is not disrupted. Use the default `docker compose ... up` command only when intentionally running or restarting the normal local stack.
 
 Health check:
 

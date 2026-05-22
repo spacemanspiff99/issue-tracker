@@ -1,9 +1,107 @@
 {% extends "base.html" %}
 {% block body %}
-<p><a href="/projects/{{ issue.project_id }}">Project</a></p>
-<h1>Issue {{ display_id(issue.sequence) }}: {{ issue.title }}</h1>
-<p>Status: {{ issue.status.value }}</p>
-<p>{{ issue.summary or "" }}</p>
+<div class="page-surface-wide issue-page">
+<header class="issue-header">
+  <a href="/projects/{{ issue.project_id }}/board">Back to Board</a>
+  <div class="issue-title-row">
+    <div>
+      <div class="issue-kicker">
+        <span class="issue-id">#{{ display_id(issue.sequence) }}</span>
+        <span class="badge state-{{ issue.status.value }}">{{ issue.status.value }}</span>
+        {% if health.blocked %}<span class="badge state-clarify">blocked</span>{% else %}<span class="badge state-done">dependency health ok</span>{% endif %}
+      </div>
+      <h1>Issue {{ display_id(issue.sequence) }}: {{ issue.title }}</h1>
+    </div>
+    {% if issue.closed_at %}<span class="closed-pill">Closed</span>{% endif %}
+  </div>
+</header>
+{% if issue.closed_at %}
+<section class="closeout-record">
+  <h2>Closeout Record <span>Immutable</span></h2>
+  <dl>
+    <dt>Originating LLM</dt>
+    <dd>{{ issue.originating_llm }}</dd>
+    <dt>Closed by</dt>
+    <dd>{{ issue.closed_by }}</dd>
+    <dt>Closed at</dt>
+    <dd>{{ issue.closed_at }}</dd>
+    <dt>Close note</dt>
+    <dd>{{ issue.close_note or "No close note recorded." }}</dd>
+  </dl>
+</section>
+{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<div class="issue-layout">
+<section>
+<h2>Summary</h2>
+<div class="summary-box">{{ issue.summary or "No summary recorded." }}</div>
+{% if issue.proposed_approach %}
+<h2>Proposed Approach</h2>
+<div class="summary-box mono-box">{{ issue.proposed_approach }}</div>
+{% endif %}
+<h2>Workflow state</h2>
+<form method="post" action="/issues/{{ issue.id }}/workflow">
+  <label>State
+    <select name="workflow_state">
+      {% for state in ["intake", "clarify", "ready-for-codex", "implementing", "verifying", "closed"] %}
+      <option value="{{ state }}" {% if workflow_state == state %}selected{% endif %}>{{ state }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Save workflow</button>
+</form>
+{% if workflow_state == "clarify" %}
+<p><span class="badge">Not Done / Needs Clarifications</span></p>
+{% endif %}
+<h2>Edit</h2>
+<form method="post" action="/issues/{{ issue.id }}/edit">
+  <label>Title <input name="title" value="{{ issue.title }}" required></label>
+  <div class="row">
+    <label>Status
+      <select name="status">
+        {% for status in ["backlog", "in-progress", "done"] %}
+        <option value="{{ status }}" {% if issue.status.value == status %}selected{% endif %}>{{ status }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Priority <input name="priority" value="{{ issue.priority }}"></label>
+    <label>Category
+      <select name="category_id">
+        <option value="">None</option>
+        {% for category in categories %}
+        <option value="{{ category.id }}" {% if issue.category_id == category.id %}selected{% endif %}>{{ category.key }} {{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </div>
+  <label>Summary <textarea name="summary">{{ issue.summary or "" }}</textarea></label>
+  <label>Proposed approach <textarea name="proposed_approach">{{ issue.proposed_approach or "" }}</textarea></label>
+  <label>Acceptance criteria <textarea name="acceptance_criteria" required>{{ issue.acceptance_criteria }}</textarea></label>
+  <button type="submit">Save issue</button>
+</form>
+<h2>Sprint assignment</h2>
+<form method="post" action="/issues/{{ issue.id }}/sprints">
+  <label>Sprint
+    <select name="sprint_id">
+      {% for sprint in sprints %}
+      <option value="{{ sprint.id }}">{{ display_id(sprint.sequence) }} {{ sprint.goal }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Assign to sprint</button>
+</form>
+<h2>Planning metadata</h2>
+<form method="post" action="/issues/{{ issue.id }}/metadata">
+  <div class="row">
+    <label>Labels <input name="labels" value="{{ (issue.labels.get('items') or [])|join(', ') }}"></label>
+    <label>Story <input name="story" value="{{ issue.labels.get('story') or '' }}"></label>
+    <label>Delivery phase <input name="delivery_phase" value="{{ issue.labels.get('delivery_phase') or '' }}"></label>
+    <label>Milestone <input name="milestone" value="{{ issue.labels.get('milestone') or '' }}"></label>
+  </div>
+  <label>Custom fields <textarea name="custom_fields">{% for key, value in (issue.labels.get('custom_fields') or {}).items() %}{{ key }}={{ value }}
+{% endfor %}</textarea></label>
+  <button type="submit">Save metadata</button>
+</form>
 <h2>Acceptance criteria</h2>
 <pre>{{ issue.acceptance_criteria }}</pre>
 <h2>Dependencies</h2>
@@ -13,7 +111,49 @@
 </form>
 <ul>
   {% for dependency in dependencies %}
-  <li>{{ dependency.blocker_issue_id }} blocks {{ dependency.blocked_issue_id }}</li>
+  <li>
+    Issue {{ display_id(dependency.blocker.sequence) }}: {{ dependency.blocker.title }}
+    blocks Issue {{ display_id(dependency.blocked.sequence) }}: {{ dependency.blocked.title }}
+  </li>
+  {% else %}
+  <li class="muted">No dependencies yet.</li>
+{% endfor %}
+</ul>
+<h2>Notes timeline</h2>
+<form method="post" action="/issues/{{ issue.id }}/comments">
+  <label>Comment <textarea name="message" required></textarea></label>
+  <button type="submit">Add comment</button>
+</form>
+<ul>
+  {% for event in events %}
+  <li>{{ event.event_type }}: {{ event.message }} <span class="muted">{{ event.actor or "system" }}</span></li>
+  {% else %}
+  <li class="muted">No notes yet.</li>
+  {% endfor %}
+</ul>
+<h2>Issue log records</h2>
+<ul>
+  {% for log in issue_logs %}
+  <li>{{ log.root_cause }} <span class="muted">{{ log.prevention_added }}</span></li>
+  {% else %}
+  <li class="muted">No issue log records linked to this issue.</li>
+  {% endfor %}
+</ul>
+<h2>GitHub references</h2>
+<form method="post" action="/issues/{{ issue.id }}/references">
+  <div class="row">
+    <label>Repository <input name="repo" placeholder="owner/repo" required></label>
+    <label>URL <input name="url" required></label>
+    <label>PR number <input name="pr_number" type="number"></label>
+    <label>Status <input name="merge_status"></label>
+  </div>
+  <button type="submit">Link reference</button>
+</form>
+<ul>
+  {% for linked in linked_prs %}
+  <li><a href="{{ linked.url }}">{{ linked.repo }}{% if linked.pr_number %}#{{ linked.pr_number }}{% endif %}</a> <span class="muted">{{ linked.merge_status or "reference" }}</span></li>
+  {% else %}
+  <li class="muted">No GitHub references yet.</li>
   {% endfor %}
 </ul>
 <h2>Close</h2>
@@ -22,4 +162,23 @@
   <label>Close note <textarea name="close_note"></textarea></label>
   <button type="submit">Close issue</button>
 </form>
+</section>
+<aside class="panel issue-sidebar">
+  <h2>Issue sidebar</h2>
+  <ul class="sidebar-list">
+    <li><strong>{{ display_id(issue.sequence) }}</strong> {{ issue.title }}</li>
+    <li><span class="badge">{{ issue.status.value }}</span> <span class="badge">{{ workflow_state }}</span></li>
+    <li>Priority: {{ issue.priority }}</li>
+    <li>Category: {{ issue.category.key if issue.category else "Uncategorized" }}</li>
+    <li>{% if health.blocked %}Blocked by open dependency{% else %}No open blockers{% endif %}</li>
+  </ul>
+  <h2>Fast links</h2>
+  <ul class="sidebar-list">
+    <li><a href="/projects/{{ issue.project_id }}/board">Board</a></li>
+    <li><a href="/projects/{{ issue.project_id }}/releases">Releases</a></li>
+    <li><a href="/projects/{{ issue.project_id }}/intake">Intake</a></li>
+  </ul>
+</aside>
+</div>
+</div>
 {% endblock %}

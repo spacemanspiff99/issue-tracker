@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="page-surface">
+  <header class="page-title-row">
+    <div>
+      <h1>Sprints</h1>
+      <p>Execution windows, assigned work, blockers, and sprint prompt context.</p>
+    </div>
+    <a class="button-link magic-button" href="/projects/{{ project.id }}/board">Board</a>
+  </header>
+
+  <section class="sprint-card-grid">
+    {% for item in rollups %}
+    {% set sprint = item.sprint %}
+    <article class="surface-card sprint-card">
+      <div class="surface-card-header">
+        <div>
+          <h2><a href="/sprints/{{ sprint.id }}">#{{ display_id(sprint.sequence) }} {{ sprint.goal }}</a></h2>
+          <span class="badge state-{{ sprint.status.value }}">{{ sprint.status.value }}</span>
+        </div>
+        <span class="count-pill">{{ item.total }} issues</span>
+      </div>
+      <div class="surface-card-body">
+        <div class="sprint-progress-line">
+          <span>{{ item.done }}/{{ item.total }} done</span>
+          <strong>{{ item.done_percent }}%</strong>
+        </div>
+        <div class="progress-track"><span class="progress-fill" style="width: {{ item.done_percent }}%"></span></div>
+        <p class="{% if item.blocked %}danger-text{% else %}muted{% endif %}">{{ item.blocked }} blocked</p>
+        <div class="tag-row">
+          {% for story, count in item.stories.items() %}
+          <span class="badge">{{ story }}: {{ count }}</span>
+          {% else %}
+          <span class="muted">No story metadata.</span>
+          {% endfor %}
+        </div>
+      </div>
+    </article>
+    {% else %}
+    <article class="surface-card">
+      <div class="surface-card-body muted">No sprints yet.</div>
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="surface-card">
+    <div class="surface-card-header"><h2>Create sprint</h2></div>
+    <form method="post" action="/projects/{{ project.id }}/sprints" class="surface-card-body">
+      <div class="row">
+        <label>Goal <input name="goal" required></label>
+        <button type="submit">Create sprint</button>
+      </div>
+      <label>Sprint prompt <textarea name="context" placeholder="Instructions, scope, verification gates, and STOP handoff for this sprint"></textarea></label>
+    </form>
+  </section>
+
+  <section class="surface-card">
+    <div class="surface-card-header"><h2>Backlog ready for sprinting</h2></div>
+    <div class="surface-card-body compact-list">
+      {% for issue in backlog[:12] %}
+      <a href="/issues/{{ issue.id }}">#{{ display_id(issue.sequence) }} {{ issue.title }}</a>
+      {% else %}
+      <span class="muted">No backlog issues available.</span>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}

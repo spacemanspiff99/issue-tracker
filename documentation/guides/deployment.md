@@ -59,6 +59,31 @@ Use `.github/workflows/local-pipeline.yml` for the local network pipeline:
 3. Optionally deploy the same revision to production at `akun@app-prod` / `192.168.10.27` after UAT passes.
 4. Verify production with pre-migration backup, Alembic, `/health`, and MCP smoke.
 
+UAT source-of-truth rule:
+
+- "Deploy to UAT" means deploy the intended current dev code after it has been committed and pushed.
+- Before dispatching the workflow, check the dev checkout with `git status --short`, identify the current branch and `HEAD` SHA, and compare that SHA with the remote ref that GitHub Actions will check out.
+- If local product, UI, schema, deployment, or documentation changes are uncommitted, do not deploy yet unless the operator explicitly chooses to deploy a named older SHA.
+- Record the exact branch and SHA in the deployment notes or PR comment.
+- Code deployment preserves the existing UAT database by default. It must not reset UAT volumes, drop/recreate the UAT database, or overwrite UAT data with dev data.
+- Code deployment does not copy the dev database. If UAT should contain dev data, run a separate backup-first data restore plan and record that data movement explicitly.
+
+Production data rules:
+
+- Production deploys preserve the existing production database by default.
+- Production deploys run only reviewed forward Alembic migrations after a successful pre-migration backup.
+- Production deploys must not reset volumes, drop/recreate databases, truncate tables, downgrade migrations, or restore data unless the user explicitly requests a production restore from a named backup.
+- Never copy dev or UAT data upward into production.
+
+Production-to-lower-environment refresh:
+
+- Copying production data down to UAT or dev for realistic testing is useful, but it is a separate data refresh operation, not a deploy.
+- A refresh must name source `prod` and target `uat` or `dev`, and must explicitly confirm that the target database will be overwritten.
+- Before overwriting the target, take a target backup and record the source backup or dump identity used for the refresh.
+- Production remains read-only for the refresh except for taking a dump or backup.
+- Document secret, password-hash, session, token, and environment-value handling before refresh. Do not copy production `.env` files or secrets to UAT/dev.
+- After restore, run Alembic, `/health`, MCP smoke, and route/browser checks against the target.
+
 The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker` and `local-dev`. The runner is container `113`, hostname `github-runner`. It acts as an orchestrator and SSHes into the UAT and production app hosts; Docker does not need to be installed inside the runner LXC.
 
 Runner-local SSH prerequisites:
@@ -103,6 +128,25 @@ Run it from GitHub Actions with:
 - `deploy_path`: `/home/akun/issue-tracker`
 - `prod_env_file`: `/home/akun/issue-tracker/prod.env`
 - `deploy_prod`: `false` for UAT-only, `true` to deploy production after UAT passes
+- `expected_deploy_sha`: the exact committed SHA the operator intends to deploy
+
+Dispatch example for a UAT-only deployment:
+
+```bash
+git status --short --branch
+git rev-parse HEAD
+git rev-parse @{u}
+gh workflow run local-pipeline.yml --ref <branch-or-sha> \
+  -f expected_deploy_sha=<exact-committed-sha> \
+  -f uat_host=192.168.10.26 \
+  -f prod_host=192.168.10.27 \
+  -f deploy_user=akun \
+  -f deploy_path=/home/akun/issue-tracker \
+  -f prod_env_file=/home/akun/issue-tracker/prod.env \
+  -f deploy_prod=false
+```
+
+The workflow prints `GITHUB_REF` and `GITHUB_SHA` and refuses to deploy unless `GITHUB_SHA` exactly matches `expected_deploy_sha`. This protects against accidentally dispatching a branch tip other than the commit that was reviewed locally. It does not make uncommitted files available to GitHub Actions; uncommitted local changes still block "deploy current dev" until they are committed and pushed, unless the operator explicitly chooses an older SHA.
 
 The deploy script enforces environment-specific host checks:
 
@@ -116,3 +160,47 @@ The remote app URLs are:
 http://192.168.10.26:8000
 http://192.168.10.27:8000
 ```
+
+## Local Docker Preflight Isolation
+
+When running checks from a temporary worktree on the dev host, do not use the default Compose identity. The live dev stack may already own the default project name, fixed PostgreSQL container name, host port, and volume.
+
+Use a distinct project name, PostgreSQL container name, and host port for isolated preflight:
+
+```bash
+COMPOSE_PROJECT_NAME=issue_tracker_preflight \
+POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres \
+APP_HTTP_PORT=18000 \
+docker compose -f deployment/docker-compose.local.yml config
+
+COMPOSE_PROJECT_NAME=issue_tracker_preflight \
+POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres \
+APP_HTTP_PORT=18000 \
+docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/
+```
+
+Before and after preflight on the dev host, confirm the live dev app remains healthy:
+
+```bash
+curl -fsS http://192.168.10.20:8000/health
+```
+
+Do not run `docker compose up`, `down`, or `rm` against the default project from a temporary worktree unless the user explicitly asks to restart dev.
+
+## Production-To-UAT Or Dev Data Refresh
+
+Data refresh is separate from deployment. It is destructive to the target environment and non-destructive to production.
+
+Required plan before execution:
+
+- Source must be `prod`.
+- Target must be either `uat` or `dev`; never target production.
+- The user must explicitly confirm the target overwrite by name.
+- Production may only be read for `pg_dump` or an equivalent backup operation.
+- Take and verify a target backup before overwrite.
+- Record the production dump identity, target backup path, target host, target database name, operator, date, and post-restore commit SHA.
+- Do not copy production `.env`, secrets, tokens, runtime config, SSH keys, or certificates to lower environments.
+- Treat sessions, password hashes, API tokens, and remembered login state as sensitive. Until the app has an automated sanitizer, expire sessions and perform target-only admin setup or password reset after restore.
+- After restore, run `alembic upgrade head`, `/health`, MCP smoke, route checks, and browser or manual UAT against the target.
+
+Never copy dev or UAT data upward into production. Production restores require a separate explicit request naming the production backup to restore.

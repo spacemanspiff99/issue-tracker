@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="page-surface">
+<h1>{{ project.name }} planning mirror</h1>
+<div class="panel">
+  <h2>Markdown import plan</h2>
+  <p>Markdown remains the durable source for long-lived sprint plans, issue prompts, UAT notes, and STOP handoffs. Mirror records into the tracker only after acceptance criteria, verification commands, recommended model, and STOP guidance are explicit.</p>
+  <ul>
+    <li>Scan `documentation/issues/`, `documentation/sprints/`, and `documentation/prompts/` for durable plans.</li>
+    <li>Create or update tracker issues with matching acceptance criteria and verification evidence.</li>
+    <li>Keep generated exports and backups under ignored local folders.</li>
+  </ul>
+</div>
+<div class="panel">
+  <h2>Story templates</h2>
+  <ul>
+    <li>UI slice: route, template, service helper, route test, browser or UAT note.</li>
+    <li>Service slice: domain invariant, repository helper, unit test, MCP parity check if exposed.</li>
+    <li>Runtime slice: Compose config, migration gate, health check, documented retry path.</li>
+  </ul>
+</div>
+</div>
+{% endblock %}

@@ -15,6 +15,7 @@ run_browser_uat="${RUN_BROWSER_UAT:-0}"
 skip_db_backup="${SKIP_DB_BACKUP:-0}"
 run_tests="${RUN_TESTS:-0}"
 run_ruff="${RUN_RUFF:-0}"
+expected_deploy_sha="${EXPECTED_DEPLOY_SHA:-}"
 release_id="${GITHUB_SHA:-manual}-$(date -u +%Y%m%d%H%M%S)"
 remote="${target_user}@${target_host}"
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
@@ -40,6 +41,11 @@ if [ "$deploy_environment" = "prod" ] && [ "$skip_db_backup" = "1" ]; then
   exit 2
 fi
 
+if [ -n "$expected_deploy_sha" ] && [ "${GITHUB_SHA:-}" != "$expected_deploy_sha" ]; then
+  echo "Refusing $deploy_environment deploy: GITHUB_SHA '${GITHUB_SHA:-}' does not match EXPECTED_DEPLOY_SHA '$expected_deploy_sha'" >&2
+  exit 2
+fi
+
 case "$deploy_path" in
   /home/*/issue-tracker|/opt/issue-tracker|/srv/issue-tracker) ;;
   *)
@@ -47,6 +53,10 @@ case "$deploy_path" in
     exit 2
     ;;
 esac
+
+echo "Deploy source ref: ${GITHUB_REF:-manual}"
+echo "Deploy source sha: ${GITHUB_SHA:-manual}"
+echo "Deploy target environment: ${deploy_environment:-unspecified}"
 
 if [ -n "$expected_target_hostname" ]; then
   actual_hostname="$(ssh "${ssh_opts[@]}" "$remote" "hostname")"
@@ -126,6 +136,7 @@ ssh "${ssh_opts[@]}" "$remote" \
        '$deploy_path/backups/$release_id/pre-migration.dump'
      docker compose -f '$compose_file' exec -T postgres rm -f '/tmp/issue-tracker-pre-migration.dump'
      test -s '$deploy_path/backups/$release_id/pre-migration.dump'
+     echo 'Pre-migration backup: $deploy_path/backups/$release_id/pre-migration.dump'
    fi
    docker compose -f '$compose_file' run --rm app alembic upgrade head
    if [ '$run_tests' = '1' ]; then
@@ -153,4 +164,4 @@ ssh "${ssh_opts[@]}" "$remote" \
      fi
    fi"
 
-echo "Deployed $release_id to $remote:$deploy_path/current"
+echo "Deployed ${GITHUB_SHA:-manual} to ${deploy_environment:-unspecified} at $remote:$deploy_path/current"

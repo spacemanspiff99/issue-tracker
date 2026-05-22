@@ -1,23 +1,51 @@
 {% extends "base.html" %}
 {% block body %}
-<p><a href="/projects/{{ sprint.project_id }}">Project</a></p>
-<h1>Sprint {{ display_id(sprint.sequence) }}: {{ sprint.goal }}</h1>
-<p>Status: {{ sprint.status.value }}</p>
+<div class="page-surface sprint-detail-page">
+<header class="page-title-row">
+  <div>
+    <h1>Sprint {{ display_id(sprint.sequence) }}: {{ sprint.goal }}</h1>
+    <p>Status: <span class="badge state-{{ sprint.status.value }}">{{ sprint.status.value }}</span></p>
+  </div>
+  <a class="button-link" href="/projects/{{ sprint.project_id }}/board?sprint_id={{ sprint.id }}">Board</a>
+</header>
+<div class="metrics">
+  <div class="metric"><strong>{{ rollup.total }}</strong><span class="muted">assigned</span></div>
+  <div class="metric"><strong>{{ rollup.done_percent }}%</strong><span class="muted">done</span></div>
+  <div class="metric"><strong>{{ rollup.blocked }}</strong><span class="muted">blocked</span></div>
+</div>
+<h2>Sprint prompt</h2>
+{% if sprint.context %}
+<pre>{{ sprint.context }}</pre>
+{% else %}
+<p class="muted">No sprint prompt has been recorded.</p>
+{% endif %}
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
 <form method="post" action="/sprints/{{ sprint.id }}/issues" class="row">
   <label>Backlog issue
     <select name="issue_id">
-      {% for issue in backlog %}
+  {% for issue in backlog %}
       <option value="{{ issue.id }}">{{ display_id(issue.sequence) }} {{ issue.title }}</option>
+      {% else %}
+      <option value="" disabled>No backlog issues available</option>
       {% endfor %}
     </select>
   </label>
   <button type="submit">Add issue</button>
 </form>
 <table>
-  <tr><th>Issue</th><th>Phase</th><th>Status</th></tr>
+  <tr><th>Issue</th><th>Phase</th><th>Issue status</th><th>Task status</th><th>Story</th></tr>
   {% for membership in memberships %}
-  <tr><td>{{ membership.issue.title }}</td><td>{{ membership.phase or "" }}</td><td>{{ membership.status.value }}</td></tr>
+  <tr>
+    <td><a href="/issues/{{ membership.issue.id }}">{{ display_id(membership.issue.sequence) }} {{ membership.issue.title }}</a></td>
+    <td>{{ membership.phase or "" }}</td>
+    <td><span class="badge">{{ membership.issue.status.value }}</span></td>
+    <td><span class="badge">{{ membership.status.value }}</span></td>
+    <td>{{ membership.issue.labels.get("story") or "Unassigned" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">No assigned issues yet.</td></tr>
   {% endfor %}
 </table>
 <form method="post" action="/sprints/{{ sprint.id }}/close"><button type="submit">Close sprint</button></form>
+</div>
 {% endblock %}

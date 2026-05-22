@@ -6,7 +6,7 @@ alwaysApply: true
 
 # Issue Tracker Core Rules
 
-This project is a personal issue tracker that replaces repo-local markdown trackers with one Python service: FastAPI + Jinja templates, SQLAlchemy 2.x, Alembic, PostgreSQL, and a stdio MCP server backed by the same service layer.
+This project is a personal issue tracker that is being dogfooded alongside repo-local markdown planning. The product target is a Python service: FastAPI + Jinja templates, SQLAlchemy 2.x, Alembic, PostgreSQL, and a stdio MCP server backed by the same service layer.
 
 ## Rule Hierarchy
 
@@ -30,6 +30,15 @@ Load these rules by task shape:
 - Treat categories as project-scoped data in the app schema. Never hardcode weather-app, investments, or storyteller category names into application logic.
 - Preserve the manual tracker ID convention from vibecoding: issues and sprints share a project-local `NNNN` sequence displayed with four zero-padded digits.
 
+## Dual Tracker Dogfooding
+
+- Use both systems while developing this version: markdown files under `documentation/` for durable Git-reviewed planning and the running issue-tracker database for active backlog and sprint state.
+- Markdown remains authoritative for rules, long-lived guidance, prompts, UAT notes, and handoffs until a deliberate migration/export workflow changes that rule.
+- The local issue-tracker project is the working board. Before implementation starts, make sure the tracker issue or sprint exists, has pass/fail acceptance criteria, recommended model/reasoning, verification commands, and STOP handoff.
+- Keep the two systems aligned. If a decision, sprint, issue, or closeout matters beyond the local database, update or link a discoverable markdown record. If a markdown issue or sprint becomes active work, add or update its tracker record.
+- Do not rely on unexported local database state as the only record of project decisions. Before destructive local reset or risky tracker changes, export or record enough evidence to recover the working backlog.
+- Generated tracker exports, backups, and local database artifacts stay out of git unless a reviewed issue explicitly adopts a committed artifact format and location.
+
 ## Architecture Boundaries
 
 - The web app and MCP server must call the same service layer. Do not duplicate issue lifecycle logic in route handlers and MCP tools.
@@ -37,6 +46,13 @@ Load these rules by task shape:
 - Repositories own database persistence. Services should not assemble ad hoc SQL unless the repository API cannot express the query cleanly.
 - Jinja pages are the v1 UI. Do not introduce React, Next.js, or a frontend build pipeline without an explicit architecture change.
 - MCP tools must return compact summaries by default. Full issue text, acceptance criteria, and history are opt-in by ID.
+
+## UI Provenance
+
+- If a UI, template, component, screenshot-derived layout, or styling direction is identified as coming from MagicPatterns, treat it as protected source design.
+- Do not rewrite, restyle, simplify, replace, or substantially modify MagicPatterns UI without explicit user instruction naming that change.
+- When implementing behavior around a MagicPatterns UI, preserve its layout, spacing, visual hierarchy, labels, and component structure unless the requested functionality cannot work without a targeted adjustment.
+- If a targeted adjustment is required, keep it minimal, document the divergence in the relevant issue/sprint or guide, and verify the rendered UI.
 
 ## Critical Thinking
 
@@ -70,5 +86,6 @@ Load these rules by task shape:
 
 | Date | Change | Peer sources consulted | Skipped |
 |---|---|---|---|
+| 2026-05-15 | Added MagicPatterns UI provenance protection: imported or identified MagicPatterns UI must not be modified without explicit user instruction. | User direction to recover the MagicPatterns rule from vibecoding; local references note Magic Patterns rules existed in peer rule sources. | Direct vibecoding contents were unavailable through local checkout and unauthenticated GitHub API. |
 | 2026-04-25 | Restored manual issue-tracking naming discipline: shared issue/sprint `NNNN` IDs, zero-padded sprint labels, and two-digit sprint task prompt sequencing. | weather-app local markdown tracker rules and vibecoding sync guide issue-tracker recipe | Weather-specific host, branch, deployment, Linear back-port, and auto-merge rules. |
 | 2026-04-24 | Initial issue-tracker rules stack: core, agents, AC, backend, devops, project issue-log taxonomy, and vibecoding onboarding scaffold. Adapted local markdown tracker workflow into a database-backed FastAPI/Jinja/MCP product. | weather-app `14ec98d23b9756fe9c2352a23f49d4f453bff60e`; investments `05141f032eb1539779ab496c9e7a7be47c8d02c7`; storyteller `39df73305bdef93b66c13df925fe222106516fef`; handbrake2resilio `6b428bca2688ccb4624bcb90c76c13b398be6a34`; scripts `abba09819c09a6cadee50efa1936e00c0a1a071f` | Weather host topology and dev/master branch flow; React/Playwright/Magic Patterns rules; investments finance taxonomy and simulation rules; storyteller iOS/Firebase rules; all peer `ISSUE_LOG.md` content. |

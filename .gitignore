@@ -33,6 +33,8 @@ logs/
 *.err
 exports/
 backups/
+releases/
+current
 *.db
 *.sqlite
 *.sqlite3
