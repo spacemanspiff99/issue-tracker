@@ -1,16 +1,39 @@
 {% extends "base.html" %}
-{% block body %}
-<h1>Projects</h1>
+{% block header_actions %}
 <form method="post" action="/logout"><button type="submit">Logout</button></form>
+{% endblock %}
+{% block body %}
+<div class="page-surface">
+<h1>Projects</h1>
+<form method="get" action="/search" class="row">
+  <label>Search projects <input name="q" value="{{ query }}" placeholder="Name, repository, tracker path"></label>
+  <label><input type="checkbox" name="show_all" value="true" {% if show_all %}checked{% endif %}> Show archived projects</label>
+  <button type="submit">Search</button>
+</form>
+<p class="muted">UAT, import, and restored projects can be archived to reduce clutter without deleting tracker data.</p>
 <form method="post" action="/projects" class="row">
   <label>Name <input name="name" required></label>
   <label>Repo URL <input name="repo_url"></label>
   <button type="submit">Create project</button>
 </form>
 <table>
-  <tr><th>Name</th><th>Repo</th></tr>
+  <tr><th>Name</th><th>Repo</th><th>Default branch</th><th>Visibility</th></tr>
   {% for project in projects %}
-  <tr><td><a href="/projects/{{ project.id }}">{{ project.name }}</a></td><td>{{ project.repo_url or "" }}</td></tr>
+  <tr>
+    <td><a href="/projects/{{ project.id }}">{{ project.name }}</a></td>
+    <td>{{ project.repo_url or "No repo URL recorded." }}</td>
+    <td><span class="badge">{{ project.default_branch }}</span></td>
+    <td>
+      <span class="badge">{{ "active" if project.active else "archived" }}</span>
+      <form method="post" action="/projects/{{ project.id }}/active" class="compact-form">
+        <input type="hidden" name="active" value="{{ 'false' if project.active else 'true' }}">
+        <button type="submit">{{ "Archive" if project.active else "Restore" }}</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">No projects yet. Create the first project above.</td></tr>
   {% endfor %}
 </table>
+</div>
 {% endblock %}

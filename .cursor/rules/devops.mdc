@@ -21,6 +21,8 @@ alwaysApply: false
 - Use `deployment/docker-compose.app.yml` for app-only deployment against an external PostgreSQL URL.
 - Build FastAPI images from an official Python base image and use exec-form commands.
 - Do not run Docker with `sudo`.
+- On the dev host, do not run Compose from a temporary worktree with the default project name if the live dev app uses the same compose file name/path convention. Use a unique `COMPOSE_PROJECT_NAME` for preflight containers, or run checks inside the existing dev project intentionally.
+- Preflight checks must not recreate, stop, or replace the user's live dev app container unless the user explicitly asks to restart dev.
 
 ## Migrations And Startup
 
@@ -36,6 +38,19 @@ alwaysApply: false
 - Keep workflows small: lint/test, Docker build, and mirror rules are separate concerns.
 - Do not author workflows directly on `main` unless explicitly requested.
 - Use concurrency for deploy or mirror workflows that can race.
+
+## UAT Deploy Source-Of-Truth Gate
+
+- A request to "deploy to UAT" means the current dev checkout is expected to be committed, pushed, and deployed by exact Git SHA.
+- Before triggering a UAT deploy workflow, check `git status --short`, the current branch, local `HEAD`, and the matching remote ref. If uncommitted product, UI, schema, deployment, or documentation changes exist, stop and either commit/push them or get explicit user confirmation to deploy a named older SHA.
+- Pass the exact intended committed SHA as `expected_deploy_sha` when dispatching `.github/workflows/local-pipeline.yml`; the workflow must refuse to deploy if `GITHUB_SHA` differs.
+- Do not describe UAT as matching dev unless both the code SHA and the intended data state are accounted for. GitHub Actions deploys committed code; it cannot include local uncommitted files.
+- UAT database state is preserved by default. Normal UAT deploys must not reset the UAT PostgreSQL volume, drop/recreate the UAT database, or overwrite UAT data with dev data.
+- Dev database state is separate from code deployment. Copying or restoring dev data into UAT requires a separate, explicit, backup-first data migration plan; never infer it from "deploy to UAT."
+- Production database state is preserved by default. Production deploys must use forward-only migrations, take a pre-migration backup, and must not reset volumes, truncate tables, downgrade migrations, or restore data unless the user explicitly requests a production restore from a named backup.
+- Production data may be copied down to overwrite UAT or dev for testing, but that is a separate data refresh workflow, not deployment. It must require explicit source/target naming, backup the target before overwrite, preserve production unchanged, sanitize or document secret/session handling, and verify the restored target with migrations, `/health`, smoke tests, and login/setup expectations.
+- Never copy dev or UAT data upward into production.
+- In closeout, report the deployed SHA and whether target data was preserved, freshly initialized, or explicitly restored/refreshed from another environment.
 
 ## Mirror Rules Workflow
 

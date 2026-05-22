@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from issue_tracker.cli import export_json, import_json
+from issue_tracker.cli import export_json, export_recovery_bundle, import_json, restore_recovery_bundle_dry_run
+from issue_tracker.services.guidance_sync import GuidanceSyncService
 from issue_tracker.services.tracker import CategoryService, IssueService, ProjectService
 
 
@@ -37,3 +38,33 @@ def test_import_requires_category_mapping_when_source_categories_exist(session, 
 
     project_id = import_json(session, source, "Imported", {"SRC-1": "IT-2"})
     assert project_id > 0
+
+
+def test_recovery_bundle_exports_sanitized_manifest_and_dry_run(session, tmp_path):
+    project = ProjectService(session).create_project("Tracker")
+    category = CategoryService(session).create_category(project.id, "IT-1", "State", "Verify state")
+    IssueService(session).create_issue(
+        project.id,
+        "Voice artifact",
+        "- [ ] exported",
+        summary="Audio artifact: `exports/voice-feedback/1/raw.webm`",
+        category_id=category.id,
+        labels=["backup"],
+    )
+    guidance = GuidanceSyncService(session)
+    source = guidance.configure_source(project.id, "Tracker", "local", ["AGENTS.md"])
+    guidance.classify_drift(project.id, "AGENTS.md", source_id=source.id, left_hash="a", right_hash="b")
+    output_dir = tmp_path / "bundle"
+
+    manifest = export_recovery_bundle(session, project.id, output_dir)
+    dry_run = restore_recovery_bundle_dry_run(session, output_dir)
+    serialized = "\n".join(path.read_text(encoding="utf-8") for path in output_dir.rglob("*") if path.is_file())
+
+    assert manifest.name == "manifest.json"
+    assert dry_run["ok"] is True
+    assert dry_run["would_create"]["issues"] == 1
+    assert dry_run["would_require_category_mapping"] is True
+    assert "raw.webm" not in serialized
+    assert "password_hash" not in serialized
+    assert "APP_SECRET_KEY" not in serialized
+    assert "guidance/sources.jsonl" in manifest.read_text(encoding="utf-8")
