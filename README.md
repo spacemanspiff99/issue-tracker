@@ -43,6 +43,7 @@ Project planning remains in `documentation/planning/PROJECT_PLAN.md`; recurring 
 Current planning additions:
 
 - `documentation/guides/deployment.md` includes the local GitHub Actions runner pipeline for UAT at `192.168.10.26` and production at `192.168.10.27`.
+- `documentation/guides/comprehensive-test-plan.md` defines the production-safety test gates for backup, restore, Guidance Sync, MCP, migrations, import/export, UAT, and deployment behavior.
 - `documentation/guides/product-guide.md` explains the purpose of the software and the current web, voice intake, release, sprint, issue, project, import/export, and MCP functionality.
 - `documentation/planning/VIBECODING_RULE_SYNC_PRODUCT_PLAN.md` plans the Guidance Sync product area for keeping child project rules aligned with `vibecoding` across branches.
 - `documentation/planning/GUIDANCE_SYNC_BACKUP_AND_RULE_RELEVANCE_BACKLOG.md` expands that plan into portable backups, vibecoding backup targets, rule applicability, critical-rule coverage, and cross-project sync backlog issues.
@@ -56,6 +57,8 @@ Current planning additions:
 - `documentation/sprints/0050-backlog-ux-release-voice-feedback-playwright.md` records the backlog completion sprint for releases, drag/drop, sidebar, voice feedback, and comprehensive Playwright coverage.
 - `documentation/sprints/0073-magicpatterns-ui-implementation.md` records the active MagicPatterns UI implementation backlog and sprint.
 - `documentation/sprints/0078-sprint-0073-ui-regression-fixes.md` records the corrective sprint for Sprint 0073 UI regressions and the Playwright gate.
+- `documentation/sprints/0112-uat-deploy-comprehensive-test-suite.md` records the closed UAT deployment sprint and final UAT evidence.
+- `documentation/sprints/0119-production-readiness-comprehensive-test-drill.md` plans the comprehensive production-readiness drill before production-project use.
 - `documentation/design/magicpatterns/UI.tsx` preserves the protected MagicPatterns-generated UI source artifact for Sprint 0073.
 - `documentation/guides/ai-coding-tracker-ux.md` records the AI-coding-specific UX principles behind the Sprint 0050 workspace changes.
 - `documentation/prompts/0043-finish-overnight-modern-web-app-buildout.md` is the fresh-session execution prompt for finishing Sprint 0043.

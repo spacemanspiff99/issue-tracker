@@ -2,6 +2,8 @@
 
 Date: 2026-05-21
 
+Execution sprint: `documentation/sprints/0119-production-readiness-comprehensive-test-drill.md`
+
 ## Purpose
 
 This plan defines how to test Issue Tracker backup, restore, Guidance Sync, rule relevance, MCP, migration, import/export, and deployment behavior without risking production tracker data.

@@ -1,10 +1,16 @@
 # Sprint 0112: UAT Deploy And Comprehensive Test Suite
 
-Status: active in the local tracker
+Status: closed in durable markdown on 2026-05-22
 
 Tracker sprint: `0112` Deploy committed dev state to UAT and run comprehensive UAT suite
 
 Created: 2026-05-22
+Closed: 2026-05-22
+
+Final deployed branch: `deploy/app-host-targets-0112`
+Final deployed SHA: `cf6257727ab908291aba1873c49167f39fc2cdfd`
+Successful workflow run: `26271545892`
+UAT target: `192.168.10.26`
 
 Source context:
 
@@ -12,6 +18,9 @@ Source context:
 - Deployment guide: `documentation/guides/deployment.md`
 - Comprehensive test plan: `documentation/guides/comprehensive-test-plan.md`
 - Fresh-session source-of-truth prompt: `documentation/prompts/0111-deployment-source-truth-and-uat-readiness.md`
+- Local preflight evidence: `documentation/uat/2026-05-22-sprint-0112-local-preflight.md`
+- UAT deployment evidence: `documentation/uat/2026-05-22-sprint-0112-uat-deploy.md`
+- Next execution sprint: `documentation/sprints/0119-production-readiness-comprehensive-test-drill.md`
 
 ## Recommendation
 
@@ -161,6 +170,32 @@ Current completed gates:
 - Empty-database Alembic upgrade reached head.
 - Isolated browser UAT passed against a containerized app.
 
+## Final UAT Deploy Evidence
+
+UAT deployment evidence is recorded in `documentation/uat/2026-05-22-sprint-0112-uat-deploy.md`.
+
+Completed UAT gates:
+
+- Branch `deploy/app-host-targets-0112` deployed SHA `cf6257727ab908291aba1873c49167f39fc2cdfd`.
+- Workflow run `26271545892` deployed to `192.168.10.26`.
+- Pre-migration backup path was recorded:
+  `/home/akun/issue-tracker/backups/cf6257727ab908291aba1873c49167f39fc2cdfd-20260522060939/pre-migration.dump`.
+- Remote full tests passed: `47 passed, 1 skipped, 1 warning in 12.35s`.
+- Remote Ruff passed.
+- Remote MCP smoke passed.
+- Remote browser UAT passed: `1 passed, 1 warning in 26.50s`.
+- UAT health passed: `{"ok":true,"database":"ok"}`.
+
+The first UAT workflow run, `26271139679`, failed on runtime artifact permissions for `exports/voice-feedback`. The fix was added to `deployment/scripts/remote-compose-deploy.sh`, then verified by the successful run above.
+
+Tracker closeout note: during the final markdown closeout, no local tracker app or container was running, and `http://127.0.0.1:8000/health` plus `http://192.168.10.20:8000/health` both refused connections. The durable sprint record is closed here; the next sprint starts with an explicit active-tracker reconciliation issue before further planning state is treated as synchronized.
+
+## Closeout Decision
+
+Sprint 0112 is complete and closed for UAT deployment readiness.
+
+Production promotion is intentionally not approved by Sprint 0112. The next required work is Sprint 0119, which runs the comprehensive production-readiness test drill from `documentation/guides/comprehensive-test-plan.md` against disposable, production-like staging, and UAT environments before any production-project decision.
+
 ## Verification Commands
 
 Source-of-truth:
@@ -216,6 +251,9 @@ If the host Python/Playwright environment is not available, run the equivalent c
 
 ## STOP
 
-Sprint `0112` is not complete until UAT is deployed from the exact pushed candidate SHA, UAT data preservation is evidenced, the comprehensive UAT suite has been run against the UAT host, and tracker plus markdown closeout evidence is complete.
+Sprint `0112` is complete and closed in durable markdown.
 
-If blocked, the STOP handoff must name the specific blocker owner action: source-control conflict, uncommitted intended code, failed local gate, failed workflow, failed backup, failed migration, UAT health failure, UAT browser regression, missing credentials, or missing browser-capable test environment.
+Remaining follow-up is assigned to Sprint 0119:
+
+- Reconnect or start the intended active tracker database and reconcile Sprint 0112 close metadata plus the Sprint 0119 backlog records.
+- Run the comprehensive production-readiness test drill before any production-project rollout.

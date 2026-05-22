@@ -1,7 +1,8 @@
 # Local Preflight Notes: Sprint 0112 UAT Candidate
 
 Date: 2026-05-22
-Candidate branch: `deploy/app-host-targets`
+Candidate branch: `deploy/app-host-targets-0112`
+Candidate SHA: `cf6257727ab908291aba1873c49167f39fc2cdfd`
 Tester: Codex in isolated Docker Compose stacks
 
 ## Result
