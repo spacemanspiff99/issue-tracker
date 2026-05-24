@@ -59,6 +59,7 @@ Current planning additions:
 - `documentation/sprints/0078-sprint-0073-ui-regression-fixes.md` records the corrective sprint for Sprint 0073 UI regressions and the Playwright gate.
 - `documentation/sprints/0112-uat-deploy-comprehensive-test-suite.md` records the closed UAT deployment sprint and final UAT evidence.
 - `documentation/sprints/0119-production-readiness-comprehensive-test-drill.md` plans the comprehensive production-readiness drill before production-project use.
+- `documentation/sprints/0129-uat-as-staging-dev-seed-production-readiness.md` plans the dev-to-UAT seed refresh and full UAT-as-staging production-readiness sprint for the pre-production app.
 - `documentation/design/magicpatterns/UI.tsx` preserves the protected MagicPatterns-generated UI source artifact for Sprint 0073.
 - `documentation/guides/ai-coding-tracker-ux.md` records the AI-coding-specific UX principles behind the Sprint 0050 workspace changes.
 - `documentation/prompts/0043-finish-overnight-modern-web-app-buildout.md` is the fresh-session execution prompt for finishing Sprint 0043.
