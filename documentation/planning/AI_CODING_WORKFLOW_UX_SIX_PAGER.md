@@ -2,9 +2,11 @@
 
 Date: 2026-05-25
 
-Status: Draft for user review
+Status: Reviewed by user; implementation backlog and sprint planning authorized
 
-Authoring context: Prepared from `documentation/prompts/0153-ai-coding-workflow-ux-six-pager.md`, Sprint 0140 usability evidence, the product guide, the AI coding tracker UX guide, the UX flow map, the manual UAT guide, and the protected MagicPatterns UI source. This draft is planning-only and does not create tracker issues, start sprints, change schema, change code, or mutate tracker data.
+Authoring context: Prepared from `documentation/prompts/0153-ai-coding-workflow-ux-six-pager.md`, Sprint 0140 usability evidence, the product guide, the AI coding tracker UX guide, the UX flow map, the manual UAT guide, and the protected MagicPatterns UI source. The user reviewed this six-pager on 2026-05-25 and authorized backlog/sprint planning. Implementation remains gated by the follow-up sprint plan.
+
+Follow-up sprint plan: `documentation/sprints/0154-ai-coding-workflow-ux-reset-implementation-plan.md`
 
 Model note: The recommended session for this product architecture work is GPT-5.5 with high reasoning. This draft was prepared in the available Codex GPT-5-class session, so the model/reasoning mismatch is recorded here for review before implementation planning proceeds.
 

@@ -42,6 +42,7 @@ Project planning remains in `documentation/planning/PROJECT_PLAN.md`; recurring 
 Current planning additions:
 
 - `documentation/planning/AI_CODING_WORKFLOW_UX_SIX_PAGER.md` is the draft product-management reset for the AI coding workflow UX and stops before user stories, tracker issues, sprint planning, schema changes, or implementation.
+- `documentation/sprints/0154-ai-coding-workflow-ux-reset-implementation-plan.md` records the tracker backlog and phased sprint plan for implementing the AI coding workflow UX six-pager through manual UAT readiness.
 - `documentation/planning/EXTERNAL_RULE_REVIEW.md` records the GitHub rule review and GPT-5.5 medium/high guidance changes.
 - `documentation/guides/manual-uat.md` is the browser and command checklist for local manual UAT.
 - `documentation/uat/TEMPLATE-local-uat.md` is the notes template for a UAT run.
