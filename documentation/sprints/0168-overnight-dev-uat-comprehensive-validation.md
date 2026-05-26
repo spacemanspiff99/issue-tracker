@@ -179,6 +179,34 @@ Add timestamped entries here as phases run.
 - 2026-05-26: Phase A passed. Recovered host disk from 97% used and 1.1G free to 48% used and 16G free by removing obsolete isolated preflight images and unused Docker build cache. Live dev containers and tracker data volume were preserved.
 - 2026-05-26: Updated process guidance to clarify that Playwright browser dependencies are installed inside the Docker image or app container, never on the host from an agent session.
 - 2026-05-26: Phase B passed. Fresh isolated preflight evidence is recorded in `documentation/uat/2026-05-26-sprint-0168-dev-preflight.md`: compose config, Docker build, empty DB migration, full tests, `/health`, MCP smoke, browser UAT, ruff, compile, and isolated cleanup all passed.
+- 2026-05-26: Phase D passed for source-control publication. Committed and pushed `a031ded4d5cc12931d164216175a89acfa10260f` to `origin/deploy/app-host-targets-0112`. Local and remote refs match. Note: `origin/dev` remains at `836a1be69eef07b31f223fee9229507899e842c9`; the tested/pushed UAT candidate is the deployment branch SHA, not the current `dev` branch head.
+
+## UAT Deploy Gate
+
+Prepared operation:
+
+- Workflow: `.github/workflows/local-pipeline.yml` (`App Deploy Pipeline`; listed by `gh workflow list` as `Local Dev UAT Pipeline`).
+- Ref: `deploy/app-host-targets-0112`.
+- Expected deploy SHA: `a031ded4d5cc12931d164216175a89acfa10260f`.
+- Target: UAT host `192.168.10.26`, deploy path `/home/akun/issue-tracker`, user `akun`.
+- Production deploy: `false`.
+- Data policy: code deploy only; preserve existing UAT database by default. Do not overwrite, restore, reset, or refresh UAT data.
+
+Dispatch command when explicitly approved:
+
+```bash
+gh workflow run local-pipeline.yml \
+  --ref deploy/app-host-targets-0112 \
+  -f uat_host=192.168.10.26 \
+  -f prod_host=192.168.10.27 \
+  -f deploy_user=akun \
+  -f deploy_path=/home/akun/issue-tracker \
+  -f prod_env_file=/home/akun/issue-tracker/prod.env \
+  -f deploy_prod=false \
+  -f expected_deploy_sha=a031ded4d5cc12931d164216175a89acfa10260f
+```
+
+STOP: Do not dispatch this workflow until the user explicitly approves deploying this exact ref/SHA to UAT with UAT data preserved.
 
 ## STOP
 
