@@ -1,0 +1,6 @@
+{% macro info_tip(text, label="Info") -%}
+<span class="info-tip">
+  <button type="button" class="info-tip-trigger" aria-label="{{ label }}">i</button>
+  <span class="info-tip-content" role="tooltip">{{ text }}</span>
+</span>
+{%- endmacro %}

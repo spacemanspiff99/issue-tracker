@@ -1,6 +1,6 @@
 # AI Coding Tracker UX Principles
 
-Linked sprint: `documentation/sprints/0050-backlog-ux-release-voice-feedback-playwright.md`
+Linked sprints: `documentation/sprints/0050-backlog-ux-release-voice-feedback-playwright.md`, `documentation/sprints/0140-urgent-usability-rescue.md`, `documentation/sprints/0154-ai-coding-workflow-ux-reset-implementation-plan.md`
 
 ## Research Inputs
 
@@ -20,8 +20,8 @@ Linked sprint: `documentation/sprints/0050-backlog-ux-release-voice-feedback-pla
 
 ## Sprint 0050 Application
 
-- Top-level project tabs expose Overview, Backlog, Board, Releases, Intake, Planning, and Backup.
+- Top-level project tabs expose Overview, Intake, Backlog, Sprint Board, Sprints, Releases, Categories, Planning, and Backup.
 - Release planning uses issue milestone metadata and readiness custom fields to roll up progress across sprints.
-- Sprint boards default to the active sprint, support single or multi-sprint filters, and still show assignment controls for backlog issues.
-- Voice feedback is intake-first: it stores audio in ignored local artifacts, creates a backlog issue, and marks ambiguous reports as `clarify`.
+- Sprint Board defaults to the active sprint, supports single or multi-sprint filters, and still shows assignment controls for backlog issues.
+- Voice feedback is intake-first: it stores audio in ignored local artifacts, creates a backlog issue, and marks raw reports as `needs-processing` or ambiguous reports as `needs-clarification`.
 - Issue detail keeps fast status, workflow, sprint assignment, metadata, dependency, reference, and closeout controls visible with a responsive sidebar.

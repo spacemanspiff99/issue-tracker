@@ -739,8 +739,10 @@
         font-family: inherit;
       }
 
-      .state-intake { background: #f1f5f9; border-color: #e2e8f0; color: #334155; }
-      .state-clarify { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+      .state-intake,
+      .state-needs-processing { background: #f1f5f9; border-color: #e2e8f0; color: #334155; }
+      .state-clarify,
+      .state-needs-clarification { background: #fffbeb; border-color: #fde68a; color: #b45309; }
       .state-ready,
       .state-ready-for-codex { background: #f5f3ff; border-color: #ddd6fe; color: #7c3aed; }
       .state-implementing,
@@ -748,7 +750,59 @@
       .state-verifying { background: #ecfeff; border-color: #a5f3fc; color: #0e7490; }
       .state-closed,
       .state-done { background: #ecfdf5; border-color: #bbf7d0; color: #047857; }
+      .state-cancelled { background: #f5f5f4; border-color: #d6d3d1; color: #57534e; }
       .state-backlog { background: #f8fafc; border-color: #e2e8f0; color: #475569; }
+
+      .info-tip {
+        display: inline-flex;
+        margin-left: .35rem;
+        position: relative;
+        vertical-align: middle;
+      }
+
+      .info-tip-trigger {
+        align-items: center;
+        background: #f8fafc;
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        color: #475569;
+        display: inline-flex;
+        font-size: .7rem;
+        font-weight: 800;
+        height: 1.15rem;
+        justify-content: center;
+        line-height: 1;
+        min-height: 0;
+        padding: 0;
+        width: 1.15rem;
+      }
+
+      .info-tip-content {
+        background: #0f172a;
+        border-radius: 6px;
+        bottom: calc(100% + .45rem);
+        color: #fff;
+        font-size: .75rem;
+        font-weight: 650;
+        left: 50%;
+        line-height: 1.35;
+        max-width: min(18rem, 80vw);
+        opacity: 0;
+        padding: .5rem .6rem;
+        pointer-events: none;
+        position: absolute;
+        transform: translateX(-50%);
+        transition: opacity .12s ease;
+        visibility: hidden;
+        width: max-content;
+        z-index: 20;
+      }
+
+      .info-tip:hover .info-tip-content,
+      .info-tip:focus-within .info-tip-content {
+        opacity: 1;
+        visibility: visible;
+      }
 
       .priority-dot {
         border-radius: 999px;
@@ -854,6 +908,40 @@
         border-radius: 6px;
         color: #475569;
         padding: .42rem .62rem;
+      }
+
+      .saved-view-grid a.active,
+      .saved-view-grid span.active {
+        background: #0f172a;
+        border-radius: 6px;
+        color: #fff;
+        font-weight: 800;
+        padding: .42rem .62rem;
+        text-decoration: none;
+      }
+
+      .filter-strip,
+      .sprint-nav-strip,
+      .release-counts {
+        align-items: center;
+        display: flex;
+        flex-wrap: wrap;
+        gap: .55rem;
+      }
+
+      .filter-strip {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        margin: 0 auto 1rem;
+        max-width: 66rem;
+        padding: .75rem;
+      }
+
+      .history-shell {
+        border-top: 1px solid #e2e8f0;
+        margin-top: 1rem;
+        padding-top: 1rem;
       }
 
       .saved-view-grid a:hover {
@@ -1340,18 +1428,21 @@
       }
 
       .board {
-        display: flex;
+        box-sizing: border-box;
+        display: grid;
         gap: 1.5rem;
+        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
         min-height: 28rem;
-        overflow-x: auto;
+        max-width: 100%;
         padding: 1.5rem;
+        width: 100%;
       }
 
       .board-column {
         background: #fff;
         border: 0;
-        flex: 0 0 20rem;
         min-height: 24rem;
+        min-width: 0;
         padding: 0;
       }
 
@@ -1468,13 +1559,13 @@
           <a href="/" class="{% if current_path == '/' or current_path.startswith('/search') %}active{% endif %}"><span class="nav-icon">#</span> Projects</a>
           {% if project is defined %}
           <a href="/projects/{{ project.id }}" class="{% if current_path == '/projects/' ~ project.id|string %}active{% endif %}"><span class="nav-icon">O</span> Overview</a>
-          <a href="/projects/{{ project.id }}/backlog" class="{% if current_path.endswith('/backlog') %}active{% endif %}"><span class="nav-icon">B</span> Backlog</a>
-          <a href="/projects/{{ project.id }}/board" class="{% if current_path.endswith('/board') %}active{% endif %}"><span class="nav-icon">K</span> Board</a>
-          <a href="/projects/{{ project.id }}/releases" class="{% if current_path.endswith('/releases') %}active{% endif %}"><span class="nav-icon">R</span> Releases</a>
           <a href="/projects/{{ project.id }}/intake" class="{% if current_path.endswith('/intake') %}active{% endif %}"><span class="nav-icon">I</span> Intake</a>
-          <a href="/projects/{{ project.id }}/guidance-sync" class="{% if current_path.endswith('/guidance-sync') %}active{% endif %}"><span class="nav-icon">G</span> Guidance Sync</a>
-          <a href="/projects/{{ project.id }}/categories" class="{% if current_path.endswith('/categories') %}active{% endif %}"><span class="nav-icon">T</span> Categories</a>
+          <a href="/projects/{{ project.id }}/backlog" class="{% if current_path.endswith('/backlog') %}active{% endif %}"><span class="nav-icon">B</span> Backlog</a>
+          <a href="/projects/{{ project.id }}/board" class="{% if current_path.endswith('/board') %}active{% endif %}"><span class="nav-icon">K</span> Sprint Board</a>
           <a href="/projects/{{ project.id }}/sprints" class="{% if current_path.endswith('/sprints') %}active{% endif %}"><span class="nav-icon">M</span> Sprints</a>
+          <a href="/projects/{{ project.id }}/releases" class="{% if current_path.endswith('/releases') %}active{% endif %}"><span class="nav-icon">R</span> Releases</a>
+          <a href="/projects/{{ project.id }}/categories" class="{% if current_path.endswith('/categories') %}active{% endif %}"><span class="nav-icon">T</span> Categories</a>
+          <a href="/projects/{{ project.id }}/guidance-sync" class="{% if current_path.endswith('/guidance-sync') %}active{% endif %}"><span class="nav-icon">G</span> Guidance Sync</a>
           <a href="/projects/{{ project.id }}/planning" class="{% if current_path.endswith('/planning') %}active{% endif %}"><span class="nav-icon">P</span> Planning</a>
           <a href="/projects/{{ project.id }}/backup" class="{% if current_path.endswith('/backup') %}active{% endif %}"><span class="nav-icon">E</span> Backup</a>
           {% endif %}

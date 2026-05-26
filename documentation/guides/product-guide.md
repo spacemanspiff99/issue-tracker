@@ -7,24 +7,24 @@ The product is intentionally not a generic Jira clone. Its main job is to turn r
 ## Core Concepts
 
 - Project: a repository or work area with its own categories, issues, sprints, releases, and backlog.
-- Issue: the canonical unit of work. Issues carry title, status, priority, category, summary, proposed approach, acceptance criteria, planning metadata, dependencies, comments, linked references, and closeout metadata.
+- Issue: the canonical unit of work. Issues carry title, status, priority, category, summary, proposed approach, acceptance criteria, planning metadata, dependencies, comments, linked references, and closeout metadata. Status values are backlog, in-progress, done, and cancelled/won't do.
 - Sprint: a planned execution batch. Sprints share the same four-digit sequence as issues and can contain many issues.
 - Release: a metadata-driven rollup across issues and sprints. Release membership comes from the issue milestone field.
-- Workflow state: AI handoff state for intake, clarify, ready-for-codex, implementing, verifying, and closed.
+- Workflow state: AI handoff state for needs-processing, needs-clarification, ready-for-codex, implementing, verifying, and closed.
 - Category: project-scoped taxonomy and prevention checklist. Tracker categories are not hardcoded from other projects.
 
 ## Web UI Functionality
 
 - First-run setup and login create and protect the local admin account.
 - Project list supports search, project creation, and non-destructive archive/restore for UAT, restored, or imported project clutter.
-- Project overview shows issue totals, done percent, blocked count, uncategorized count, AI workflow counts, release readiness, voice intake entrypoint, saved views, quick issue creation, issue table actions, sprint creation, sprint progress, categories, recent activity, and issue log entries.
-- Saved issue views filter by all, backlog, active sprint, blocked, done, and uncategorized. Issue search covers title, summary, category, and acceptance criteria.
-- Backlog view supports drag-and-drop ordering and a route-backed Save order form.
-- Board view is sprint-oriented. It defaults to the active sprint when one exists, supports single-sprint and multi-sprint filtering, can show all work, and includes backlog-to-sprint assignment controls.
-- Release view rolls up issues by milestone, showing progress, blockers, unscheduled work, linked sprints, and readiness notes from `readiness=...` custom fields.
-- Intake view supports voice feedback. Users can record audio in the browser, upload an audio file, add written notes, mark ambiguous feedback as Not Done / Needs Clarifications, and create a backlog intake issue.
+- Project overview shows issue totals, done percent, blocked count, uncategorized count, AI workflow counts, release readiness, voice intake entrypoint, saved views, quick issue creation, issue table actions, sprint creation, sprint progress, categories, recent activity, and issue log entries. Dashboard counts link to deterministic filtered backlog or board URLs.
+- Saved issue views filter by all, needs processing, needs clarification, ready for Codex, unsprinted ready work, blocked, done, cancelled/won't do, backlog, active sprint, uncategorized, and issues not in sprint. Issue search covers title, summary, labels, category, and acceptance criteria.
+- Backlog view supports drag-and-drop ordering, route-backed Save order, visible saved-view state, and query-string filters for status, workflow state, category, milestone, unscheduled work, and text search.
+- Sprint Board view is sprint-oriented. It defaults to the active sprint when one exists, separates active/planned sprint controls from collapsed closed history, can show all work, and includes backlog-to-sprint assignment controls.
+- Release view rolls up issues by milestone, groups releases into current, upcoming, archive, and unplanned work, and links total, done, blocked, and unscheduled counts into filtered backlog URLs.
+- Intake view supports voice feedback. Users can record audio in the browser, upload an audio file, add written notes, mark ambiguous feedback as Needs clarification, and create a Needs processing intake issue.
 - Issue detail provides editing, workflow state changes, sprint assignment, planning metadata, acceptance criteria, dependencies, notes timeline, GitHub/reference links, closeout metadata, and a responsive sidebar for fast context.
-- Sprint detail shows sprint context, rollup progress, issue membership, backlog assignment, and close action.
+- Sprints default to active and planned work. Closed sprint history is searchable and collapsed outside the default planning view. Sprint detail shows sprint context, rollup progress, issue membership, backlog assignment, and close action.
 - Planning and backup pages point to durable markdown and CLI workflows without committing generated exports or backups.
 - Guidance Sync shows configured guidance sources, tracked paths, scan health, drift findings, sync proposals, and audit evidence for cross-repository AI guidance alignment.
 
@@ -36,14 +36,14 @@ Voice feedback is intake-first and provider-neutral.
 2. Enter a short title.
 3. Either record audio in the browser or upload an audio file.
 4. Add optional written notes or a transcript.
-5. Check Not Done / Needs Clarifications when the report is ambiguous.
-6. Submit the form to create a normal backlog issue labeled as voice feedback.
+5. Check Needs clarification when the report is ambiguous.
+6. Submit the form to create a normal backlog issue labeled as voice feedback with workflow state Needs processing or Needs clarification.
 
-Uploaded or recorded audio is stored under the ignored local artifact path `exports/voice-feedback/`. Raw audio must not be committed. The created issue stores a local artifact reference, written notes, acceptance criteria for Codex processing, and workflow metadata. The next step is for Codex or a human to investigate the intake and convert it into a build-ready issue or leave it in `clarify`.
+Uploaded or recorded audio is stored under the ignored local artifact path `exports/voice-feedback/`. Raw audio must not be committed. The created issue stores a local artifact reference, written notes, acceptance criteria for Codex processing, and workflow metadata. The next step is for Codex or a human to investigate the intake and convert it into Ready for Codex work or leave it in Needs clarification.
 
 ## Agent And MCP Functionality
 
-The stdio MCP server uses the same service layer as the web UI. It exposes compact tools for project listing, issue creation, issue lookup, issue search, status updates, dependencies, sprint creation, sprint assignment, sprint lookup, category listing, and next-action summaries.
+The stdio MCP server uses the same service layer as the web UI. It exposes compact tools for project listing, issue creation, issue lookup, issue search, status and workflow-aware saved views, status updates, dependencies, sprint creation, sprint assignment, sprint lookup, category listing, and next-action summaries.
 
 Guidance Sync MCP tools expose compact sync health, drift listing, and proposal creation. Full diff or repository mutation workflows are intentionally not default MCP output.
 
@@ -76,8 +76,9 @@ Planned next maturity level:
 - Alembic migrations live in the root `migrations/` tree.
 - JSON import/export commands are available for project data, with explicit category mapping required when source categories exist.
 - Exports, backups, screenshots, raw audio, local databases, credentials, and other generated artifacts are ignored by git.
-- Closing issues preserves close metadata: originating LLM, closed by, close note, and closed timestamp.
-- Closed issue metadata is immutable through the service layer.
+- Closing done or cancelled/won't-do issues preserves close metadata: originating LLM, closed by, close note, and closed timestamp.
+- Terminal issue metadata is immutable through the service layer.
+- Accidental raw voice-feedback drafts can be discarded only while they are non-durable backlog intake records; sprinted, dependent, referenced, closed, or processed work must be cancelled or archived instead of deleted.
 
 ## Verification
 

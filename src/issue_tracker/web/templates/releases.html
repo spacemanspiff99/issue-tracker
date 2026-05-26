@@ -1,68 +1,74 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface releases-page">
   <header class="page-title-row">
     <div>
-      <h1>{{ project.name }} releases</h1>
-      <p>Milestone rollups across issues and sprints.</p>
+      <h1>{{ project.name }} releases {{ info_tip("Release data comes from issue milestone metadata. Counts link to filtered backlog URLs.") }}</h1>
+      <p>Milestone rollups grouped by current risk, upcoming scope, closed archive, and unplanned work.</p>
     </div>
-    <a class="button-link magic-button" href="/projects/{{ project.id }}/planning">New Release</a>
+    <a class="button-link magic-button" href="/projects/{{ project.id }}/planning">Planning</a>
   </header>
 
-  {% for release in release_rollups %}
-  <article class="surface-card release-card">
-    <div class="release-card-header">
-      <div>
-        <h2>{{ release.name }}</h2>
-        <div class="release-meta">
-          <span>Target: Q2 2026</span>
-          <span>Sprints:
-            {% for sprint in release.sprints %}
-            <a href="/sprints/{{ sprint.id }}">#{{ display_id(sprint.sequence) }}</a>{% if not loop.last %}, {% endif %}
+  {% for section_key, section_label in [("current", "Current"), ("upcoming", "Upcoming"), ("archive", "Archive"), ("unplanned", "Unplanned work")] %}
+  <section>
+    <h2>{{ section_label }}</h2>
+    {% for release in release_sections[section_key] %}
+    <article class="surface-card release-card">
+      <div class="release-card-header">
+        <div>
+          <h2>{{ release.name }}</h2>
+          <div class="release-meta">
+            <span>Sprints:
+              {% for sprint in release.sprints %}
+              <a href="/sprints/{{ sprint.id }}">#{{ display_id(sprint.sequence) }}</a>{% if not loop.last %}, {% endif %}
+              {% else %}
+              No sprint
+              {% endfor %}
+            </span>
+          </div>
+        </div>
+        <a class="release-chevron" href="/projects/{{ project.id }}/backlog?view=all&milestone={{ release.name|urlencode }}">›</a>
+      </div>
+      <div class="surface-card-body">
+        <div class="sprint-progress-line">
+          <span>Overall Progress</span>
+          <strong>{{ release.done_percent }}%</strong>
+        </div>
+        <div class="progress-track"><span class="progress-fill" style="width: {{ release.done_percent }}%"></span></div>
+        <div class="release-counts">
+          <a class="badge" href="/projects/{{ project.id }}/backlog?view=all&milestone={{ release.name|urlencode }}">{{ release.total }} total</a>
+          <a class="badge state-done" href="/projects/{{ project.id }}/backlog?view=all&milestone={{ release.name|urlencode }}&status=done">{{ release.done }} done</a>
+          <a class="badge state-clarify" href="/projects/{{ project.id }}/backlog?view=blocked&milestone={{ release.name|urlencode }}">{{ release.blocked }} blocked</a>
+          <a class="badge" href="/projects/{{ project.id }}/backlog?view=all&milestone={{ release.name|urlencode }}&unscheduled=true">{{ release.unscheduled }} unscheduled</a>
+        </div>
+        <div class="release-detail-grid">
+          <div>
+            <h3>Readiness Notes</h3>
+            {% for note in release.readiness_notes %}
+            <p>{{ note }}</p>
             {% else %}
-            No sprint
+            <p class="muted">No readiness note. Add <code>readiness=...</code> in issue metadata when this release needs explicit gate evidence.</p>
             {% endfor %}
-          </span>
+          </div>
+          <div>
+            {% if release.blocked %}
+            <p class="release-blocker"><span>!</span> Active Blockers <strong>{{ release.blocked }}</strong></p>
+            {% endif %}
+            <p class="release-scope"><span>Total Scope</span><strong>{{ release.total }} issues</strong></p>
+          </div>
         </div>
       </div>
-      <a class="release-chevron" href="/projects/{{ project.id }}?view=all">›</a>
-    </div>
-    <div class="surface-card-body">
-      <div class="sprint-progress-line">
-        <span>Overall Progress</span>
-        <strong>{{ release.done_percent }}%</strong>
-      </div>
-      <div class="progress-track"><span class="progress-fill" style="width: {{ release.done_percent }}%"></span></div>
-      <div class="release-status-line">
-        <span>{{ release.done }} of {{ release.total }} issues closed</span>
-        {% if release.unscheduled %}<span class="warning-text">{{ release.unscheduled }} unscheduled issues</span>{% endif %}
-      </div>
-      <div class="release-detail-grid">
-        <div>
-          <h3>Readiness Notes</h3>
-          {% for note in release.readiness_notes %}
-          <p>{{ note }}</p>
-          {% else %}
-          <p class="muted">No readiness note</p>
-          {% endfor %}
-        </div>
-        <div>
-          {% if release.blocked %}
-          <p class="release-blocker"><span>!</span> Active Blockers <strong>{{ release.blocked }}</strong></p>
-          {% endif %}
-          <p class="release-scope"><span>Total Scope</span><strong>{{ release.total }} issues</strong></p>
-        </div>
-      </div>
-    </div>
-  </article>
-  {% else %}
-  <section class="surface-card"><div class="surface-card-body muted">Add issue milestone metadata to create release rollups.</div></section>
+    </article>
+    {% else %}
+    <p class="muted">No {{ section_label|lower }} releases.</p>
+    {% endfor %}
+  </section>
   {% endfor %}
 
   <section class="surface-card">
     <div class="surface-card-header"><h2>Release planning model</h2></div>
     <div class="surface-card-body">
-      <p>Release planning uses issue milestone metadata so MVP, v1.0, and later initiatives can roll up across multiple sprints without a schema change while dogfooding continues.</p>
       <p>Set an issue milestone and optional custom field <code>readiness=...</code> from the issue detail page to feed this view.</p>
     </div>
   </section>

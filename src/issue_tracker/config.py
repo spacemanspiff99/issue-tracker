@@ -14,7 +14,9 @@ class Settings(BaseModel):
     admin_initial_password: str | None = None
     session_cookie_secure: bool = False
     mcp_enabled: bool = True
+    app_environment: str = "development"
     log_level: str = "INFO"
+    log_format: str = "json"
 
 
 def _as_bool(value: str | None, default: bool) -> bool:
@@ -33,5 +35,7 @@ def get_settings() -> Settings:
         admin_initial_password=getenv("ADMIN_INITIAL_PASSWORD") or None,
         session_cookie_secure=_as_bool(getenv("SESSION_COOKIE_SECURE"), False),
         mcp_enabled=_as_bool(getenv("MCP_ENABLED"), True),
+        app_environment=getenv("APP_ENVIRONMENT", Settings().app_environment),
         log_level=getenv("LOG_LEVEL", Settings().log_level),
+        log_format=getenv("LOG_FORMAT", Settings().log_format),
     )

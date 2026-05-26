@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface">
-<h1>{{ project.name }} planning mirror</h1>
+<h1>{{ project.name }} planning mirror {{ info_tip("Planning keeps markdown and tracker records aligned before implementation starts.") }}</h1>
 <div class="panel">
   <h2>Markdown import plan</h2>
   <p>Markdown remains the durable source for long-lived sprint plans, issue prompts, UAT notes, and STOP handoffs. Mirror records into the tracker only after acceptance criteria, verification commands, recommended model, and STOP guidance are explicit.</p>

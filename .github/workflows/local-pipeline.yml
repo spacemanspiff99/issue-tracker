@@ -56,6 +56,7 @@ jobs:
       - name: Deploy to app-uat
         env:
           DEPLOY_ENVIRONMENT: uat
+          APP_ENVIRONMENT: uat
           EXPECTED_DEPLOY_SHA: ${{ inputs.expected_deploy_sha }}
           TARGET_HOST: ${{ inputs.uat_host }}
           EXPECTED_TARGET_HOST: 192.168.10.26
@@ -88,6 +89,7 @@ jobs:
       - name: Deploy to app-prod
         env:
           DEPLOY_ENVIRONMENT: prod
+          APP_ENVIRONMENT: production
           EXPECTED_DEPLOY_SHA: ${{ inputs.expected_deploy_sha }}
           TARGET_HOST: ${{ inputs.prod_host }}
           EXPECTED_TARGET_HOST: 192.168.10.27

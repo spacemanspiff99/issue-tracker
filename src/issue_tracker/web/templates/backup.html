@@ -1,7 +1,8 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface">
-<h1>{{ project.name }} backup and restore</h1>
+<h1>{{ project.name }} backup and restore {{ info_tip("Backups separate sanitized Git-safe recovery bundles from raw artifacts like audio, screenshots, and database dumps.") }}</h1>
 <div class="panel">
   <h2>Portable recovery bundle</h2>
   <p>Create a sanitized bundle with tracker records, guidance sync state, audit summaries, checksums, app version, source commit, and migration revision. Raw audio, screenshots, certificates, `.env`, database dumps, sessions, password hashes, and secrets are excluded.</p>

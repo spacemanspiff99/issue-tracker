@@ -67,6 +67,7 @@ UAT source-of-truth rule:
 - Record the exact branch and SHA in the deployment notes or PR comment.
 - Code deployment preserves the existing UAT database by default. It must not reset UAT volumes, drop/recreate the UAT database, or overwrite UAT data with dev data.
 - Code deployment does not copy the dev database. If UAT should contain dev data, run a separate backup-first data restore plan and record that data movement explicitly.
+- A plan, sprint, or checklist that describes a UAT refresh is not approval to execute it. Before overwriting UAT, stop and require the operator to reply with `CONFIRM OVERWRITE uat`.
 
 Production data rules:
 
@@ -79,6 +80,8 @@ Production-to-lower-environment refresh:
 
 - Copying production data down to UAT or dev for realistic testing is useful, but it is a separate data refresh operation, not a deploy.
 - A refresh must name source `prod` and target `uat` or `dev`, and must explicitly confirm that the target database will be overwritten.
+- Required confirmation phrase before overwrite: `CONFIRM OVERWRITE <target>`, where `<target>` is `uat` or `dev`.
+- Generic continuation messages such as `ok`, `continue`, `ssh key setup`, `credentials ready`, or `try again` only resolve the immediate blocker. They do not authorize a later restore, deploy, workflow dispatch, volume reset, or other target mutation.
 - Before overwriting the target, take a target backup and record the source backup or dump identity used for the refresh.
 - Production remains read-only for the refresh except for taking a dump or backup.
 - Document secret, password-hash, session, token, and environment-value handling before refresh. Do not copy production `.env` files or secrets to UAT/dev.
@@ -161,9 +164,28 @@ http://192.168.10.26:8000
 http://192.168.10.27:8000
 ```
 
+Observability follow-up:
+
+- Application containers emit structured stderr logs with stable `app`, `service`, `source`, and
+  `environment` fields. `APP_ENVIRONMENT` must be set to `dev`, `uat`, or `production` in the
+  relevant environment file before those logs are used for dashboards.
+- Uvicorn access logging is disabled in container startup; use the application `http_request`
+  summary logs instead so query strings, request bodies, cookies, and raw IDs are not collected.
+- Container log shipping gaps are tracked in `documentation/issues/0013-container-logging-loki-labels.md`.
+- Do not treat UAT or production logging as complete until Loki queries from the monitoring host show issue-tracker `app` and `postgres` streams for dev, UAT, and production with stable environment labels.
+
 ## Local Docker Preflight Isolation
 
 When running checks from a temporary worktree on the dev host, do not use the default Compose identity. The live dev stack may already own the default project name, fixed PostgreSQL container name, host port, and volume.
+
+Before building, check host and Docker capacity:
+
+```bash
+df -h / /tmp
+docker system df
+```
+
+Playwright browser dependencies are container dependencies. The app image may install Chromium and required Linux libraries during `docker compose build`; do not install Playwright browser dependencies on the dev host from an agent session. If browser UAT cannot run because dependencies are missing, rebuild the app image or run the test inside the app container.
 
 Use a distinct project name, PostgreSQL container name, and host port for isolated preflight:
 
@@ -187,6 +209,21 @@ curl -fsS http://192.168.10.20:8000/health
 
 Do not run `docker compose up`, `down`, or `rm` against the default project from a temporary worktree unless the user explicitly asks to restart dev.
 
+After isolated preflight, clean up temporary resources before closeout:
+
+```bash
+COMPOSE_PROJECT_NAME=issue_tracker_preflight \
+POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres \
+APP_HTTP_PORT=18000 \
+docker compose -f deployment/docker-compose.local.yml down -v
+
+docker image rm issue_tracker_preflight-app
+docker builder prune
+docker system df
+```
+
+The `down -v` command is only for the disposable preflight project named above. Do not remove the default dev project, production or UAT containers, or any named volume that may contain tracker data unless that exact target is explicitly confirmed. Prefer targeted image removal and builder-cache cleanup before broad Docker pruning.
+
 ## Production-To-UAT Or Dev Data Refresh
 
 Data refresh is separate from deployment. It is destructive to the target environment and non-destructive to production.
@@ -195,7 +232,7 @@ Required plan before execution:
 
 - Source must be `prod`.
 - Target must be either `uat` or `dev`; never target production.
-- The user must explicitly confirm the target overwrite by name.
+- The user must explicitly confirm the target overwrite with `CONFIRM OVERWRITE <target>`.
 - Production may only be read for `pg_dump` or an equivalent backup operation.
 - Take and verify a target backup before overwrite.
 - Record the production dump identity, target backup path, target host, target database name, operator, date, and post-restore commit SHA.

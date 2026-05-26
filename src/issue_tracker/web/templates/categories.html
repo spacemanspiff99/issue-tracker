@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface">
   <header class="page-title-row">
     <div>
-      <h1>Categories</h1>
+      <h1>Categories {{ info_tip("Categories are project-scoped. The recommended taxonomy is short, but existing categories stay readable for history.") }}</h1>
       <p>Project-scoped taxonomy with issue counts and prevention checklist ownership.</p>
     </div>
     <form method="post" action="/projects/{{ project.id }}/categories/base" class="plain-form">
@@ -16,7 +17,7 @@
     <article class="surface-card category-card">
       <div class="surface-card-header">
         <h2>{{ category.key }} {{ category.name }}</h2>
-        <span class="count-pill">{{ issue_counts[category.id] }} issues</span>
+        <a class="count-pill" href="/projects/{{ project.id }}/backlog?view=all&category_id={{ category.id }}">{{ issue_counts[category.id] }} issues</a>
       </div>
       <div class="surface-card-body">
         <p>{{ category.description or "No description recorded." }}</p>
@@ -31,9 +32,9 @@
     <article class="surface-card category-card">
       <div class="surface-card-header">
         <h2>Uncategorized</h2>
-        <span class="count-pill">{{ uncategorized_count }} issues</span>
+        <a class="count-pill" href="/projects/{{ project.id }}/backlog?view=uncategorized">{{ uncategorized_count }} issues</a>
       </div>
-      <div class="surface-card-body muted">Issues still needing category binding.</div>
+      <div class="surface-card-body muted">Issues still needing category binding. Use the backlog uncategorized saved view to triage them.</div>
     </article>
   </section>
 

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import logging
-import sys
 
+from issue_tracker.config import get_settings
 from issue_tracker.db import SessionLocal
+from issue_tracker.logging import configure_logging
 from issue_tracker.mcp import tools
 
-logging.basicConfig(stream=sys.stderr, level=logging.INFO)
+configure_logging(get_settings(), service="mcp")
 
 
 def smoke() -> dict[str, object]:

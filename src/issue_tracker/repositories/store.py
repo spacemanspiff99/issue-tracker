@@ -163,9 +163,12 @@ class Repository:
         )
 
     def active_sprint(self, project_id: int) -> Sprint | None:
+        return self.current_sprint(project_id)
+
+    def current_sprint(self, project_id: int) -> Sprint | None:
         return self.session.scalar(
             select(Sprint)
-            .where(Sprint.project_id == project_id, Sprint.status != SprintStatus.CLOSED)
+            .where(Sprint.project_id == project_id, Sprint.status == SprintStatus.ACTIVE)
             .order_by(Sprint.sequence.desc())
         )
 

@@ -1,12 +1,13 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface">
   <header class="page-title-row">
     <div>
-      <h1>Sprints</h1>
+      <h1>Sprints {{ info_tip("This page defaults to active and planned sprints. Closed sprint history is separate and searchable.") }}</h1>
       <p>Execution windows, assigned work, blockers, and sprint prompt context.</p>
     </div>
-    <a class="button-link magic-button" href="/projects/{{ project.id }}/board">Board</a>
+    <a class="button-link magic-button" href="/projects/{{ project.id }}/board">Sprint Board</a>
   </header>
 
   <section class="sprint-card-grid">
@@ -38,9 +39,47 @@
     </article>
     {% else %}
     <article class="surface-card">
-      <div class="surface-card-body muted">No sprints yet.</div>
+      <div class="surface-card-body muted">No active or planned sprints. Create the next sprint or open closed history below.</div>
     </article>
     {% endfor %}
+  </section>
+
+  <section class="surface-card history-shell">
+    <div class="surface-card-header">
+      <h2>Closed sprint history {{ info_tip("Closed sprints are newest first and kept out of the default planning view.") }}</h2>
+    </div>
+    <div class="surface-card-body">
+      <form method="get" action="/projects/{{ project.id }}/sprints" class="filter-strip">
+        <input type="hidden" name="history" value="true">
+        <label>Search history <input name="sprint_q" value="{{ sprint_query }}" placeholder="Sprint number or goal"></label>
+        <button type="submit">Search</button>
+        {% if not show_history %}<a class="button-link" href="/projects/{{ project.id }}/sprints?history=true">Show history</a>{% endif %}
+      </form>
+      {% if show_history or sprint_query %}
+      <section class="sprint-card-grid">
+        {% for item in history_rollups %}
+        {% set sprint = item.sprint %}
+        <article class="surface-card sprint-card">
+          <div class="surface-card-header">
+            <div>
+              <h2><a href="/sprints/{{ sprint.id }}">#{{ display_id(sprint.sequence) }} {{ sprint.goal }}</a></h2>
+              <span class="badge state-closed">closed{% if sprint.closed_at %} {{ sprint.closed_at.date() }}{% endif %}</span>
+            </div>
+            <span class="count-pill">{{ item.total }} issues</span>
+          </div>
+          <div class="surface-card-body">
+            <p>{{ item.done }}/{{ item.total }} done, {{ item.blocked }} blocked</p>
+            <a href="/projects/{{ project.id }}/board?sprint_id={{ sprint.id }}">Open historical board</a>
+          </div>
+        </article>
+        {% else %}
+        <p class="muted">No closed sprints match this search.</p>
+        {% endfor %}
+      </section>
+      {% else %}
+      <p class="muted">History is collapsed so closed sprints do not dominate sprint planning.</p>
+      {% endif %}
+    </div>
   </section>
 
   <section class="surface-card">

@@ -4,6 +4,7 @@ set -euo pipefail
 target_host="${TARGET_HOST:?TARGET_HOST is required}"
 target_user="${TARGET_USER:-akun}"
 deploy_environment="${DEPLOY_ENVIRONMENT:-}"
+app_environment="${APP_ENVIRONMENT:-}"
 expected_target_host="${EXPECTED_TARGET_HOST:-}"
 expected_target_hostname="${EXPECTED_TARGET_HOSTNAME:-}"
 deploy_path="${DEPLOY_PATH:-/home/akun/issue-tracker}"
@@ -44,6 +45,14 @@ fi
 if [ -n "$expected_deploy_sha" ] && [ "${GITHUB_SHA:-}" != "$expected_deploy_sha" ]; then
   echo "Refusing $deploy_environment deploy: GITHUB_SHA '${GITHUB_SHA:-}' does not match EXPECTED_DEPLOY_SHA '$expected_deploy_sha'" >&2
   exit 2
+fi
+
+if [ -z "$app_environment" ]; then
+  case "$deploy_environment" in
+    prod) app_environment="production" ;;
+    uat) app_environment="uat" ;;
+    *) app_environment="${deploy_environment:-development}" ;;
+  esac
 fi
 
 case "$deploy_path" in
@@ -100,6 +109,7 @@ ssh "${ssh_opts[@]}" "$remote" \
    chmod -R u+rwX,go+rwX exports backups
    export APP_BASE_URL='$app_base_url'
    export APP_HTTP_PORT='$app_http_port'
+   export APP_ENVIRONMENT='$app_environment'
    if [ '$deploy_environment' = 'prod' ]; then
      for required_name in APP_SECRET_KEY DATABASE_URL POSTGRES_PASSWORD; do
        case \"\$required_name\" in

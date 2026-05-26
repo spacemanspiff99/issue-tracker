@@ -31,6 +31,7 @@ The default rule is simple: do not test new mutating behavior against a producti
    - `deployment/docker-compose.local.yml`.
    - Fake projects only.
    - Safe for browser UAT, local import/export, local bundle export, and destructive local reset.
+   - Browser UAT and Playwright dependency installation run inside the Docker image or app container, not on the host.
 
 3. **Production-like staging database**
    - A separate PostgreSQL database restored from a production dump.

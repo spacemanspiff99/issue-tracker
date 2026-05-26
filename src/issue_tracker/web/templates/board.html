@@ -1,18 +1,30 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
+{% set board_return = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
 <div class="page-surface-wide board-page">
 <header class="board-header">
   <div>
-    <h1>{{ project.name }} board</h1>
-    <form method="get" action="/projects/{{ project.id }}/board" class="plain-form board-filter">
-      <select name="sprint_id" multiple size="1" aria-label="Sprint filter">
-        {% for sprint in sprints %}
-        <option value="{{ sprint.id }}" {% if sprint.id in selected_sprint_ids %}selected{% endif %}>{{ display_id(sprint.sequence) }} {{ sprint.goal }}</option>
-        {% endfor %}
-      </select>
-      <label><input type="checkbox" name="all_sprints" value="true" {% if all_sprints %}checked{% endif %}> All Work</label>
-      <button type="submit">Filter</button>
-    </form>
+    <h1>{{ project.name }} Sprint Board {{ info_tip("The board defaults to the active sprint. Selecting a sprint writes sprint_id into the URL for deterministic handoff.") }}</h1>
+    <div class="sprint-nav-strip">
+      {% for sprint in sprint_navigation.current %}
+      <a class="badge state-active {% if sprint.id in selected_sprint_ids %}active{% endif %}" href="/projects/{{ project.id }}/board?sprint_id={{ sprint.id }}">Active #{{ display_id(sprint.sequence) }}</a>
+      {% endfor %}
+      {% for sprint in sprint_navigation.planned[:5] %}
+      <a class="badge state-planned {% if sprint.id in selected_sprint_ids %}active{% endif %}" href="/projects/{{ project.id }}/board?sprint_id={{ sprint.id }}">Planned #{{ display_id(sprint.sequence) }}</a>
+      {% endfor %}
+      <a class="badge" href="/projects/{{ project.id }}/board?all_sprints=true">All Work</a>
+      <details>
+        <summary>History</summary>
+        <div class="compact-list">
+          {% for sprint in sprint_navigation.history[:25] %}
+          <a href="/projects/{{ project.id }}/board?sprint_id={{ sprint.id }}">#{{ display_id(sprint.sequence) }} {{ sprint.goal }}</a>
+          {% else %}
+          <span class="muted">No closed sprint history.</span>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
   </div>
   <div class="board-actions">
     <a class="button-link" href="/projects/{{ project.id }}/backlog">Backlog</a>
@@ -27,7 +39,7 @@
 <div class="board">
   {% for status, issues in columns.items() %}
   <section class="board-column drop-zone" data-status="{{ status }}">
-    <h2><span><span class="state-dot state-{{ status }}"></span>{{ status }}</span><span class="count-pill">{{ issues|length }}</span></h2>
+    <h2><span><span class="state-dot state-{{ status }}"></span>{{ status_labels[status] }}</span><span class="count-pill">{{ issues|length }}</span></h2>
     {% for issue in issues %}
     <article class="issue-card" draggable="true" data-issue-id="{{ issue.id }}">
       <div class="issue-card-top">
@@ -38,10 +50,11 @@
       <p><span class="badge">{{ issue.category.key if issue.category else "Uncategorized" }}</span></p>
       <form method="post" action="/issues/{{ issue.id }}/status" class="compact-form">
         <input type="hidden" name="priority" value="{{ issue.priority }}">
+        <input type="hidden" name="return_to" value="{{ board_return }}">
         <label>Move
           <select name="status">
-            {% for option in ["backlog", "in-progress", "done"] %}
-            <option value="{{ option }}" {% if option == status %}selected{% endif %}>{{ option }}</option>
+            {% for option in status_options %}
+            <option value="{{ option.value }}" {% if option.value == status %}selected{% endif %}>{{ option.label }}</option>
             {% endfor %}
           </select>
         </label>
@@ -62,9 +75,10 @@
     <td><a href="/issues/{{ issue.id }}">{{ display_id(issue.sequence) }} {{ issue.title }}</a></td>
     <td>
       <form method="post" action="/issues/{{ issue.id }}/sprints" class="compact-form">
+        <input type="hidden" name="return_to" value="{{ board_return }}">
         <label>Sprint
           <select name="sprint_id">
-            {% for sprint in sprints %}
+            {% for sprint in sprints if sprint.status.value != "closed" %}
             <option value="{{ sprint.id }}">{{ display_id(sprint.sequence) }} {{ sprint.goal }}</option>
             {% endfor %}
           </select>

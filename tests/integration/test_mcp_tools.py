@@ -41,6 +41,24 @@ def test_mcp_mutating_path_uses_services(session):
     assert full["issue"]["close_note"] == "verified"
 
 
+def test_mcp_cancelled_status_is_compact_and_separate(session):
+    project = ProjectService(session).create_project("Tracker")
+    created = tools.issue_create(session, project.id, "Skip this", "- [ ] skip")
+    updated = tools.issue_update_status(
+        session,
+        created["issue"]["id"],
+        "cancelled",
+        originating_llm="gpt-5.5",
+        closed_by="mcp-smoke",
+        close_note="won't do",
+    )
+    search = tools.issue_search(session, project_id=project.id, status="cancelled")
+
+    assert updated["issue"]["status"] == "cancelled"
+    assert search["issues"] == [updated["issue"]]
+    assert "acceptance_criteria" not in search["issues"][0]
+
+
 def test_mcp_dependency_sprint_category_and_next_action_paths_are_compact(session):
     project = ProjectService(session).create_project("Tracker")
     CategoryService(session).create_category(project.id, "IT-1", "Tracker State", "Verify tracker state")
@@ -73,10 +91,19 @@ def test_mcp_issue_search_uses_shared_saved_views(session):
     IssueService(session).add_dependency(blocker.id, blocked.id)
 
     result = tools.issue_search(session, project_id=project.id, view="blocked")
+    not_sprinted = tools.issue_search(session, project_id=project.id, view="not-in-sprint")
 
     assert result["issues"] == [
-        {"id": blocked.id, "sequence": "0002", "title": "Blocked", "status": "backlog", "priority": "normal"}
+        {
+            "id": blocked.id,
+            "sequence": "0002",
+            "title": "Blocked",
+            "status": "backlog",
+            "workflow_state": "ready-for-codex",
+            "priority": "normal",
+        }
     ]
+    assert [issue["title"] for issue in not_sprinted["issues"]] == ["Blocker", "Blocked"]
 
 
 def test_mcp_guidance_sync_tools_are_compact(session):

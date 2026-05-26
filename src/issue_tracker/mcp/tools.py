@@ -49,12 +49,23 @@ def issue_search(
     session: Session,
     project_id: int | None = None,
     status: str | None = None,
+    workflow_state: str | None = None,
     limit: int = 20,
     view: str = "all",
     query: str = "",
+    milestone: str = "",
+    unscheduled: bool = False,
 ):
-    if project_id is not None and (view != "all" or query.strip()):
-        issues = IssueService(session).list_project_view(project_id=project_id, view=view, query=query)[:limit]
+    if project_id is not None and (view != "all" or query.strip() or workflow_state or milestone or unscheduled):
+        issues = IssueService(session).list_project_view(
+            project_id=project_id,
+            view=view,
+            query=query,
+            status=status,
+            workflow_state=workflow_state,
+            milestone=milestone,
+            unscheduled=unscheduled,
+        )[:limit]
     else:
         issues = IssueService(session).search(project_id=project_id, status=status, limit=limit)
     return {"issues": [compact_issue(issue) for issue in issues], "limit": min(max(limit, 1), 50)}

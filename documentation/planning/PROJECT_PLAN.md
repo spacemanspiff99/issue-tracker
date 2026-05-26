@@ -192,7 +192,9 @@ Environment variables:
 - `ADMIN_INITIAL_PASSWORD` or first-run setup mode
 - `SESSION_COOKIE_SECURE`
 - `MCP_ENABLED`
+- `APP_ENVIRONMENT`
 - `LOG_LEVEL`
+- `LOG_FORMAT`
 
 Compose strategy:
 - `deployment/docker-compose.local.yml`: app + local Postgres for development.

@@ -45,6 +45,9 @@ Current planning additions:
 - `documentation/guides/deployment.md` includes the local GitHub Actions runner pipeline for UAT at `192.168.10.26` and production at `192.168.10.27`.
 - `documentation/guides/comprehensive-test-plan.md` defines the production-safety test gates for backup, restore, Guidance Sync, MCP, migrations, import/export, UAT, and deployment behavior.
 - `documentation/guides/product-guide.md` explains the purpose of the software and the current web, voice intake, release, sprint, issue, project, import/export, and MCP functionality.
+- `documentation/guides/issue-tracker-ux-flow-map.md` records the Sprint 0140 human and AI-agent flow baseline for intake, backlog, board, sprints, releases, categories, and issue detail.
+- `documentation/planning/AI_CODING_WORKFLOW_UX_SIX_PAGER.md` is the draft product-management reset for the AI coding workflow UX and stops before user stories, tracker issues, sprint planning, schema changes, or implementation.
+- `documentation/sprints/0154-ai-coding-workflow-ux-reset-implementation-plan.md` records the tracker backlog and phased sprint plan for implementing the AI coding workflow UX six-pager through manual UAT readiness.
 - `documentation/planning/VIBECODING_RULE_SYNC_PRODUCT_PLAN.md` plans the Guidance Sync product area for keeping child project rules aligned with `vibecoding` across branches.
 - `documentation/planning/GUIDANCE_SYNC_BACKUP_AND_RULE_RELEVANCE_BACKLOG.md` expands that plan into portable backups, vibecoding backup targets, rule applicability, critical-rule coverage, and cross-project sync backlog issues.
 - `documentation/planning/EXTERNAL_RULE_REVIEW.md` records the GitHub rule review and GPT-5.5 medium/high guidance changes.
@@ -60,7 +63,9 @@ Current planning additions:
 - `documentation/sprints/0112-uat-deploy-comprehensive-test-suite.md` records the closed UAT deployment sprint and final UAT evidence.
 - `documentation/sprints/0119-production-readiness-comprehensive-test-drill.md` plans the comprehensive production-readiness drill before production-project use.
 - `documentation/sprints/0129-uat-as-staging-dev-seed-production-readiness.md` plans the dev-to-UAT seed refresh and full UAT-as-staging production-readiness sprint for the pre-production app.
+- `documentation/sprints/0140-urgent-usability-rescue.md` plans the urgent user-flow-first usability rescue backlog for intake, overview, backlog, board, releases, categories, sprints, and contextual help.
 - `documentation/design/magicpatterns/UI.tsx` preserves the protected MagicPatterns-generated UI source artifact for Sprint 0073.
 - `documentation/guides/ai-coding-tracker-ux.md` records the AI-coding-specific UX principles behind the Sprint 0050 workspace changes.
 - `documentation/prompts/0043-finish-overnight-modern-web-app-buildout.md` is the fresh-session execution prompt for finishing Sprint 0043.
-- `documentation/issues/0008-local-runtime-gate.md` through `documentation/issues/0012-uat-findings-and-release-decision.md` are the sprint issues.
+- `documentation/prompts/0153-ai-coding-workflow-ux-six-pager.md` is the fresh-session planning prompt for the AI coding workflow UX six-pager and stops before implementation.
+- `documentation/issues/0008-local-runtime-gate.md` through `documentation/issues/0013-container-logging-loki-labels.md` are the sprint issues and observability follow-ups.

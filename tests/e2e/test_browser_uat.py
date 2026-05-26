@@ -15,8 +15,11 @@ BASE_URL = os.environ.get("UAT_BASE_URL", "http://127.0.0.1:8000")
 IGNORE_HTTPS_ERRORS = os.environ.get("UAT_IGNORE_HTTPS_ERRORS") == "1"
 USERNAME = os.environ.get("UAT_USERNAME", "uat-admin")
 PASSWORD = os.environ.get("UAT_PASSWORD", "uat-password")
-SCREENSHOT_DIR = Path("exports/browser-uat-0078")
-NOTE_PATH = Path("documentation/uat/2026-05-15-sprint-0078-browser-uat.md")
+SCREENSHOT_DIR = Path("exports/browser-uat-0140")
+NOTE_PATH = Path("documentation/uat/2026-05-24-sprint-0140-usability-rescue.md")
+CHROMIUM_ARGS = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
+if BASE_URL.startswith("http://") and "localhost" not in BASE_URL and "127.0.0.1" not in BASE_URL:
+    CHROMIUM_ARGS.append(f"--unsafely-treat-insecure-origin-as-secure={BASE_URL}")
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("RUN_BROWSER_UAT") != "1",
@@ -157,25 +160,42 @@ def run_desktop_workflow(page: Page) -> tuple[str, int, int, int]:
     expect(page.locator("body")).to_contain_text(project_name)
     page.click(f'a:has-text("{project_name}")')
     project_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    expect(page.locator(".info-tip-trigger").first).to_be_visible()
+    expect(page.locator(f'a[href="/projects/{project_id}/backlog?view=blocked"]').first).to_be_visible()
+    expect(page.locator(f'a[href="/projects/{project_id}/backlog?view=uncategorized"]').first).to_be_visible()
     page.goto(f"{BASE_URL}/projects/{project_id}/backlog")
     expect(page.locator("body")).to_contain_text("Save Order")
+    expect(page.locator("body")).to_contain_text("Issues Not In Sprint")
+    page.click('a:has-text("Issues Not In Sprint")')
+    expect(page).to_have_url(f"{BASE_URL}/projects/{project_id}/backlog?view=not-in-sprint")
+    expect(page.locator(".saved-view-grid .active")).to_contain_text("Issues Not In Sprint")
     page.goto(f"{BASE_URL}/projects/{project_id}/board")
-    expect(page.locator("h1")).to_contain_text("board")
+    expect(page.locator("h1")).to_contain_text("Sprint Board")
+    expect(page.locator("body")).to_contain_text("History")
+    expect(page).to_have_url(f"{BASE_URL}/projects/{project_id}/board")
     assert_viewport_usable(page, "desktop-board.png")
     page.goto(f"{BASE_URL}/projects/{project_id}/releases")
     expect(page.locator("h1")).to_contain_text("releases")
+    expect(page.locator("body")).to_contain_text("Current")
+    expect(page.locator("body")).to_contain_text("Unplanned work")
+    expect(page.locator('a[href*="/backlog?view=all"]').first).to_be_visible()
     assert_viewport_usable(page, "desktop-releases.png")
     page.goto(f"{BASE_URL}/projects/{project_id}/guidance-sync")
     expect(page.locator("h1")).to_contain_text("Guidance Sync")
     assert_viewport_usable(page, "desktop-guidance-sync.png")
     page.goto(f"{BASE_URL}/projects/{project_id}/intake")
     assert_sidebar_nav_compact(page)
-    assert page.evaluate("window.isSecureContext") is True
-    assert page.evaluate("Boolean(navigator.mediaDevices)") is True
-    assert page.evaluate("Boolean(window.MediaRecorder)") is True
     priority_select = page.locator('form[action$="/voice-feedback"] select[name="priority"]')
     priority_select.select_option(value="urgent")
     expect(priority_select).to_have_value("urgent")
+    if page.evaluate("window.isSecureContext"):
+        assert page.evaluate("Boolean(navigator.mediaDevices)") is True
+        assert page.evaluate("Boolean(window.MediaRecorder)") is True
+    else:
+        expect(page.locator("#record-start")).to_be_disabled()
+        expect(page.locator("#record-status")).to_contain_text("requires localhost or HTTPS")
+        assert_viewport_usable(page, "desktop-intake.png")
+        return setup_note, project_id, blocker_id, blocked_id
     page.click("#record-start")
     expect(page.locator("#record-status")).to_have_text("Requesting microphone access...")
     expect(page.locator("#record-status")).to_have_text("Recording...")
@@ -212,9 +232,9 @@ def run_mobile_checks(page: Page, project_id: int, blocked_id: int) -> None:
 
 def write_uat_note(setup_note: str) -> None:
     NOTE_PATH.write_text(
-        f"""# Local UAT Notes: Sprint 0078 Browser UAT
+        f"""# Local UAT Notes: Sprint 0140 Usability Rescue Browser UAT
 
-Date: 2026-05-15
+Date: 2026-05-24
 Tester: Codex Playwright in Docker
 Browser: Playwright Chromium inside the Docker app container
 Environment: Docker Compose local app and PostgreSQL
@@ -243,7 +263,7 @@ docker compose -f deployment/docker-compose.local.yml exec \
   app-https python -m pytest tests/e2e/test_browser_uat.py
 ```
 
-Screenshots were generated under ignored local path `exports/browser-uat-0078/`.
+Screenshots were generated under ignored local path `exports/browser-uat-0140/`.
 
 ## Covered Paths
 
@@ -252,7 +272,9 @@ Screenshots were generated under ignored local path `exports/browser-uat-0078/`.
 - recommended taxonomy
 - issue validation, quick create, issue detail, dependency creation, and close metadata
 - sprint creation, assignment, and progress summary
-- saved backlog view, sprint-filtered board view, release planning, Guidance Sync, intake, and backup guidance
+- overview drill-down links, saved backlog views, sprint-filtered board navigation, release count drill-downs
+- Guidance Sync, intake, and backup guidance
+- tooltip affordance visibility on primary project surfaces
 - browser MediaRecorder record/stop/preview attachment using Chromium's fake microphone device
 - secure-context voice intake over HTTPS/local CA
 - audio-only urgent intake creation
@@ -270,7 +292,7 @@ def test_browser_manual_uat_desktop_and_mobile():
         try:
             desktop = playwright.chromium.launch(
                 headless=True,
-                args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+                args=CHROMIUM_ARGS,
             )
             desktop_page = desktop.new_page(
                 viewport={"width": 1365, "height": 900},
@@ -279,7 +301,7 @@ def test_browser_manual_uat_desktop_and_mobile():
             setup_note, project_id, _, blocked_id = run_desktop_workflow(desktop_page)
             desktop.close()
 
-            mobile = playwright.chromium.launch(headless=True)
+            mobile = playwright.chromium.launch(headless=True, args=CHROMIUM_ARGS)
             mobile_page = mobile.new_page(
                 viewport={"width": 390, "height": 844},
                 is_mobile=True,

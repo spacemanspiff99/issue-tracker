@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface-wide">
   <header class="page-title-row">
     <div>
-      <h1>{{ project.name }} Guidance Sync</h1>
+      <h1>{{ project.name }} Guidance Sync {{ info_tip("Guidance Sync shows drift and proposals without mutating mirrored rules until reviewed.") }}</h1>
       <p>Read-only guidance health, drift, proposals, and audit evidence.</p>
     </div>
   </header>

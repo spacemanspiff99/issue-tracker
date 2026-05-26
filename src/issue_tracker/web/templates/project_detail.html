@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface overview-page">
 <header class="page-title-row">
   <div>
-    <h1>{{ project.name }}</h1>
+    <h1>{{ project.name }} {{ info_tip("Overview cards link to filtered backlog or board URLs so the same state can be reopened by a human or AI agent.") }}</h1>
     <p>Local-first project tracker for steering AI coding work.</p>
   </div>
   <div class="row">
@@ -14,37 +15,39 @@
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 <div class="nav-list">
   <a href="/projects/{{ project.id }}">Overview</a>
-  <a href="/projects/{{ project.id }}/backlog">Backlog</a>
-  <a href="/projects/{{ project.id }}/board">Board</a>
-  <a href="/projects/{{ project.id }}/releases">Releases</a>
   <a href="/projects/{{ project.id }}/intake">Intake</a>
+  <a href="/projects/{{ project.id }}/backlog">Backlog</a>
+  <a href="/projects/{{ project.id }}/board">Sprint Board</a>
+  <a href="/projects/{{ project.id }}/sprints">Sprints</a>
+  <a href="/projects/{{ project.id }}/releases">Releases</a>
+  <a href="/projects/{{ project.id }}/categories">Categories</a>
   <a href="/projects/{{ project.id }}/guidance-sync">Guidance Sync</a>
   <a href="/projects/{{ project.id }}/planning">Planning</a>
   <a href="/projects/{{ project.id }}/backup">Backup</a>
 </div>
 <div class="metrics">
-  <div class="metric"><strong>{{ summary.total }}</strong><span class="muted">issues</span></div>
-  <div class="metric"><strong>{{ summary.done_percent }}%</strong><span class="muted">done</span></div>
-  <div class="metric"><strong>{{ summary.blocked }}</strong><span class="muted">blocked</span></div>
-  <div class="metric"><strong>{{ summary.uncategorized }}</strong><span class="muted">uncategorized</span></div>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=all"><strong>{{ summary.total }}</strong><span class="muted">issues</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=done"><strong>{{ summary.done_percent }}%</strong><span class="muted">done</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=blocked"><strong>{{ summary.blocked }}</strong><span class="muted">blocked</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=uncategorized"><strong>{{ summary.uncategorized }}</strong><span class="muted">uncategorized</span></a>
 </div>
-<h2>AI workflow</h2>
+<h2>AI workflow {{ info_tip("Workflow states identify raw intake, clarification, ready-for-Codex work, implementation, verification, and closed records.") }}</h2>
 <div class="metrics">
   {% for state, count in workflow_summary.items() %}
-  <div class="metric"><strong>{{ count }}</strong><span class="muted">{{ state }}</span></div>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view={{ state }}"><strong>{{ count }}</strong><span class="muted">{{ overview_dashboard.workflow_labels[state] }}</span></a>
   {% endfor %}
 </div>
-<h2>Lifecycle dashboard</h2>
+<h2>Workflow command center</h2>
 <div class="metrics">
   {% for status, count in overview_dashboard.status_counts.items() %}
-  <div class="metric"><strong>{{ count }}</strong><span class="muted">{{ status }}</span></div>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view={{ status if status in ['done', 'cancelled'] else 'all' }}&status={{ status }}"><strong>{{ count }}</strong><span class="muted">{{ overview_dashboard.status_labels[status] }}</span></a>
   {% endfor %}
   {% for phase, count in overview_dashboard.delivery_phases.items() %}
-  <div class="metric"><strong>{{ count }}</strong><span class="muted">{{ phase }}</span></div>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=all&q={{ phase|urlencode }}"><strong>{{ count }}</strong><span class="muted">{{ phase }}</span></a>
   {% endfor %}
   {% if overview_dashboard.active_sprint %}
-  <div class="metric"><strong>{{ display_id(overview_dashboard.active_sprint.sequence) }}</strong><span class="muted">active sprint</span></div>
-  <div class="metric"><strong>{{ overview_dashboard.active_sprint_total }}</strong><span class="muted">sprint issues</span></div>
+  <a class="metric" href="/projects/{{ project.id }}/board?sprint_id={{ overview_dashboard.active_sprint.id }}"><strong>{{ display_id(overview_dashboard.active_sprint.sequence) }}</strong><span class="muted">active sprint</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=active-sprint"><strong>{{ overview_dashboard.active_sprint_total }}</strong><span class="muted">sprint issues</span></a>
   {% else %}
   <div class="metric"><strong>0</strong><span class="muted">active sprint</span></div>
   {% endif %}
@@ -82,13 +85,13 @@
   <tr><td colspan="5" class="muted">No release metadata yet.</td></tr>
   {% endfor %}
 </table>
-<h2>Saved views</h2>
+<h2>Saved views {{ info_tip("Saved views open the backlog route with visible query-string filters.") }}</h2>
 <div class="nav-list">
   {% for saved_view in saved_views %}
-    {% if saved_view == view %}
-    <span class="active">{{ saved_view }}</span>
+    {% if saved_view.key == view %}
+    <span class="active">{{ saved_view.label }}</span>
     {% else %}
-    <a href="/projects/{{ project.id }}?view={{ saved_view }}">{{ saved_view }}</a>
+    <a href="/projects/{{ project.id }}/backlog?view={{ saved_view.key }}">{{ saved_view.label }}</a>
     {% endif %}
   {% endfor %}
 </div>
@@ -111,7 +114,7 @@
     <select name="category_id">
       <option value="">None</option>
       {% for category in categories %}
-      <option value="{{ category.id }}">{{ category.key }} {{ category.name }}</option>
+      <option value="{{ category.id }}">{{ category.name }}</option>
       {% endfor %}
     </select>
   </label>
@@ -133,7 +136,7 @@
       <form method="post" action="/issues/{{ issue.id }}/sprints" class="compact-form">
         <label>Assign sprint
           <select name="sprint_id">
-            {% for sprint in sprints %}
+            {% for sprint in sprints if sprint.status.value != "closed" %}
             <option value="{{ sprint.id }}">{{ display_id(sprint.sequence) }} {{ sprint.goal }}</option>
             {% endfor %}
           </select>
@@ -143,8 +146,8 @@
       <form method="post" action="/issues/{{ issue.id }}/status" class="compact-form">
         <label>Status
           <select name="status">
-            {% for status in ["backlog", "in-progress", "done"] %}
-            <option value="{{ status }}" {% if issue.status.value == status %}selected{% endif %}>{{ status }}</option>
+            {% for status in status_options %}
+            <option value="{{ status.value }}" {% if issue.status.value == status.value %}selected{% endif %}>{{ status.label }}</option>
             {% endfor %}
           </select>
         </label>

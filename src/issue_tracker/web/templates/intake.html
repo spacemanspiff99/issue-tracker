@@ -1,9 +1,10 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface intake-page">
   <header class="page-title-row">
     <div>
-      <h1>Voice Intake</h1>
+      <h1>Voice Intake {{ info_tip("Recording gives immediate state feedback. If browser recording is unavailable, upload fallback still creates the same intake issue.") }}</h1>
       <p>Record rough feedback or ideas to be processed into actionable work.</p>
     </div>
   </header>
@@ -14,14 +15,14 @@
     <label>Priority
       <select name="priority">
         <option value="low">Low</option>
-        <option value="medium" selected>Medium</option>
+        <option value="normal" selected>Normal</option>
         <option value="high">High</option>
         <option value="urgent">Urgent</option>
       </select>
     </label>
 
     <section class="audio-panel">
-      <h2>Audio Recording</h2>
+      <h2>Audio Recording {{ info_tip("Stop attaches a non-empty recording, shows playback, and autosaves a discoverable voice-feedback issue.") }}</h2>
       <div class="audio-grid">
         <div class="record-area">
           <button type="button" id="record-start" class="record-button">Record audio</button>
@@ -45,19 +46,19 @@
     <label>Notes / Transcript (Optional)
       <textarea name="notes" placeholder="Add any written context, links, or a manual transcript..."></textarea>
     </label>
-    <label class="clarify-box"><input type="checkbox" name="ambiguous" value="true"> Not Done / Needs Clarifications <span>Flags this intake issue so it stays in clarify until a human resolves ambiguity.</span></label>
-    <div class="submit-row"><button class="primary-action" type="submit">Create backlog intake issue</button></div>
+    <label class="clarify-box"><input type="checkbox" name="ambiguous" value="true"> Needs clarification <span>Flags this intake issue so it stays in Needs clarification until a human resolves ambiguity.</span></label>
+    <div class="submit-row"><button class="primary-action" type="submit">Create Needs processing issue</button></div>
   </form>
 
   <section class="surface-card">
-    <div class="surface-card-header"><h2>Intake queue</h2></div>
+    <div class="surface-card-header"><h2>Intake queue {{ info_tip("Raw intake, Needs clarification, and Ready for Codex issues appear here until processed.") }}</h2></div>
     <div class="surface-card-body intake-queue">
       {% for issue in intakes %}
-      {% set state = issue.labels.get("custom_fields", {}).get("workflow_state", "ready-for-codex") %}
+      {% set state = workflow_states.get(issue.id, "ready-for-codex") %}
       <a class="intake-item" href="/issues/{{ issue.id }}">
         <span class="issue-id">#{{ display_id(issue.sequence) }}</span>
         <strong>{{ issue.title }}</strong>
-        <span class="badge state-{{ state|replace('-for-codex', '') }}">{{ state }}</span>
+        <span class="badge state-{{ state }}">{{ workflow_labels.get(state, state|replace('-', ' ')) }}</span>
         <span class="muted">{{ issue.summary or "" }}</span>
       </a>
       {% else %}

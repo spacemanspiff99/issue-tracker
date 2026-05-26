@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -12,12 +14,16 @@ from starlette.status import HTTP_303_SEE_OTHER
 
 from issue_tracker.config import get_settings
 from issue_tracker.db import check_database, get_session
+from issue_tracker.logging import configure_logging
 from issue_tracker.repositories.store import Repository
 from issue_tracker.services.backup_targets import VibecodingBackupService
 from issue_tracker.services.guidance_sync import GuidanceSyncService
 from issue_tracker.services.recovery_bundle import RecoveryBundleService
 from issue_tracker.services.rule_relevance import RuleRelevanceService
 from issue_tracker.services.tracker import (
+    BACKLOG_SAVED_VIEWS,
+    ISSUE_STATUS_LABELS,
+    WORKFLOW_STATE_LABELS,
     AuthService,
     CategoryService,
     DomainError,
@@ -40,6 +46,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).with_name("templates"))
 templates.env.globals["display_id"] = display_id
 
 VOICE_UPLOAD_ROOT = Path("exports/voice-feedback")
+LOGGER = logging.getLogger("issue_tracker.web")
 
 
 def project_detail_response(
@@ -50,10 +57,24 @@ def project_detail_response(
     status_code: int = 200,
     view: str = "all",
     query: str = "",
+    status: str | None = None,
+    workflow_state: str | None = None,
+    milestone: str = "",
+    category_id: int | None = None,
+    unscheduled: bool = False,
 ):
     project = ProjectService(session).get_project(project_id)
     issue_service = IssueService(session)
-    issues = issue_service.list_project_view(project_id, view=view, query=query)
+    issues = issue_service.list_project_view(
+        project_id,
+        view=view,
+        query=query,
+        status=status,
+        workflow_state=workflow_state,
+        milestone=milestone,
+        category_id=category_id,
+        unscheduled=unscheduled,
+    )
     categories = CategoryService(session).list_categories(project_id)
     logs = IssueLogService(session).list_entries(project_id)
     repo = Repository(session)
@@ -65,6 +86,7 @@ def project_detail_response(
     overview_dashboard = issue_service.overview_dashboard(project_id)
     activity = issue_service.activity_feed(project_id, limit=20)
     dependency_health = {issue.id: issue_service.dependency_health(issue.id) for issue in issues}
+    workflow_states = {issue.id: issue_service.workflow_state(issue) for issue in issues}
     return templates.TemplateResponse(
         request,
         "project_detail.html",
@@ -82,9 +104,19 @@ def project_detail_response(
             "overview_dashboard": overview_dashboard,
             "activity": activity,
             "dependency_health": dependency_health,
+            "workflow_states": workflow_states,
             "view": view,
             "query": query,
-            "saved_views": ["all", "backlog", "active-sprint", "blocked", "done", "uncategorized"],
+            "saved_views": issue_service.saved_views(),
+            "status_options": issue_service.status_options(),
+            "workflow_options": issue_service.workflow_options(),
+            "status_labels": ISSUE_STATUS_LABELS,
+            "workflow_labels": WORKFLOW_STATE_LABELS,
+            "selected_status": status or "",
+            "selected_workflow_state": workflow_state or "",
+            "selected_milestone": milestone,
+            "selected_category_id": category_id,
+            "unscheduled": unscheduled,
             "error": error,
         },
         status_code=status_code,
@@ -104,6 +136,8 @@ def issue_detail_context(session: Session, issue_id: int, error: str | None = No
         "dependencies": repo.list_dependencies_for_issue(issue_id),
         "categories": CategoryService(session).list_categories(issue.project_id),
         "sprints": repo.list_project_sprints(issue.project_id),
+        "status_options": issue_service.status_options(),
+        "workflow_options": issue_service.workflow_options(),
         "health": issue_service.dependency_health(issue_id),
         "workflow_state": issue_service.workflow_state(issue),
         "linked_prs": repo.list_linked_prs(issue_id),
@@ -120,6 +154,18 @@ def safe_voice_upload_path(project_id: int, filename: str) -> Path:
     if suffix not in {".webm", ".m4a", ".mp3", ".wav", ".ogg", ".flac"}:
         suffix = ".audio"
     return VOICE_UPLOAD_ROOT / str(project_id) / f"{uuid4().hex}{suffix}"
+
+
+def parse_optional_int(value: str | int | None) -> int | None:
+    if isinstance(value, int):
+        return value
+    if value is None or not str(value).strip():
+        return None
+    return int(str(value))
+
+
+def local_redirect_target(value: str, fallback: str) -> str:
+    return value if value.startswith("/") and not value.startswith("//") else fallback
 
 
 def sprint_detail_response(
@@ -152,6 +198,7 @@ def sprint_detail_response(
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging(settings, service="app")
     app = FastAPI(title="Issue Tracker")
     app.add_middleware(
         SessionMiddleware,
@@ -159,6 +206,37 @@ def create_app() -> FastAPI:
         https_only=settings.session_cookie_secure,
         same_site="lax",
     )
+
+    @app.middleware("http")
+    async def log_request_summary(request: Request, call_next):
+        start = perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration_ms = round((perf_counter() - start) * 1000, 2)
+            LOGGER.exception(
+                "request failed",
+                extra={
+                    "duration_ms": duration_ms,
+                    "event": "http_request",
+                    "method": request.method,
+                    "route": _route_template(request),
+                    "status_code": 500,
+                },
+            )
+            raise
+        duration_ms = round((perf_counter() - start) * 1000, 2)
+        LOGGER.info(
+            "request complete",
+            extra={
+                "duration_ms": duration_ms,
+                "event": "http_request",
+                "method": request.method,
+                "route": _route_template(request),
+                "status_code": response.status_code,
+            },
+        )
+        return response
 
     @app.get("/health")
     def health(session: Session = Depends(get_session)) -> dict[str, object]:
@@ -279,23 +357,58 @@ def create_app() -> FastAPI:
         project_id: int,
         view: str = "all",
         q: str = "",
+        status: str | None = None,
+        workflow_state: str | None = None,
+        milestone: str = "",
+        category_id: str = "",
+        unscheduled: bool = False,
         session: Session = Depends(get_session),
     ):
         require_user(request, session)
-        return project_detail_response(request, session, project_id, view=view, query=q)
+        return project_detail_response(
+            request,
+            session,
+            project_id,
+            view=view,
+            query=q,
+            status=status,
+            workflow_state=workflow_state,
+            milestone=milestone,
+            category_id=parse_optional_int(category_id),
+            unscheduled=unscheduled,
+        )
 
     @app.get("/projects/{project_id}/backlog", response_class=HTMLResponse)
     def backlog_view(
         request: Request,
         project_id: int,
+        view: str = "backlog",
         q: str = "",
+        status: str | None = None,
+        workflow_state: str | None = None,
+        milestone: str = "",
+        category_id: str = "",
+        unscheduled: bool = False,
         session: Session = Depends(get_session),
     ):
         require_user(request, session)
         project = ProjectService(session).get_project(project_id)
         issue_service = IssueService(session)
-        issues = issue_service.list_project_view(project_id, view="backlog", query=q)
+        if view not in BACKLOG_SAVED_VIEWS:
+            view = "backlog"
+        parsed_category_id = parse_optional_int(category_id)
+        issues = issue_service.list_project_view(
+            project_id,
+            view=view,
+            query=q,
+            status=status,
+            workflow_state=workflow_state,
+            milestone=milestone,
+            category_id=parsed_category_id,
+            unscheduled=unscheduled,
+        )
         repo = Repository(session)
+        sprints = repo.list_project_sprints(project_id)
         return templates.TemplateResponse(
             request,
             "backlog.html",
@@ -304,10 +417,21 @@ def create_app() -> FastAPI:
                 "project": project,
                 "issues": issues,
                 "categories": CategoryService(session).list_categories(project_id),
-                "sprints": repo.list_project_sprints(project_id),
+                "sprints": sprints,
                 "dependency_health": {issue.id: issue_service.dependency_health(issue.id) for issue in issues},
+                "workflow_states": {issue.id: issue_service.workflow_state(issue) for issue in issues},
                 "query": q,
-                "saved_views": ["all", "backlog", "active-sprint", "blocked", "done", "uncategorized"],
+                "view": view,
+                "saved_views": issue_service.saved_views(),
+                "status_options": issue_service.status_options(),
+                "workflow_options": issue_service.workflow_options(),
+                "status_labels": ISSUE_STATUS_LABELS,
+                "workflow_labels": WORKFLOW_STATE_LABELS,
+                "selected_status": status or "",
+                "selected_workflow_state": workflow_state or "",
+                "selected_milestone": milestone,
+                "selected_category_id": parsed_category_id,
+                "unscheduled": unscheduled,
             },
         )
 
@@ -324,9 +448,10 @@ def create_app() -> FastAPI:
         repo = Repository(session)
         service = IssueService(session)
         sprints = repo.list_project_sprints(project_id)
+        sprint_navigation = service.sprint_navigation(project_id)
         selected_sprint_ids = sprint_id
         if not selected_sprint_ids and not all_sprints:
-            active = repo.active_sprint(project_id)
+            active = repo.current_sprint(project_id)
             selected_sprint_ids = [active.id] if active else []
         selected_issue_ids: set[int] | None = None
         if selected_sprint_ids:
@@ -342,6 +467,7 @@ def create_app() -> FastAPI:
             "backlog": [issue for issue in issues if issue.status.value == "backlog"],
             "in-progress": [issue for issue in issues if issue.status.value == "in-progress"],
             "done": [issue for issue in issues if issue.status.value == "done"],
+            "cancelled": [issue for issue in issues if issue.status.value == "cancelled"],
         }
         backlog = service.list_project_view(project_id, view="backlog")
         return templates.TemplateResponse(
@@ -352,9 +478,12 @@ def create_app() -> FastAPI:
                 "project": project,
                 "columns": columns,
                 "sprints": sprints,
+                "sprint_navigation": sprint_navigation,
                 "selected_sprint_ids": selected_sprint_ids,
                 "all_sprints": all_sprints,
                 "backlog": backlog,
+                "status_options": service.status_options(),
+                "status_labels": ISSUE_STATUS_LABELS,
             },
         )
 
@@ -369,6 +498,7 @@ def create_app() -> FastAPI:
                 "request": request,
                 "project": project,
                 "release_rollups": IssueService(session).release_rollups(project_id),
+                "release_sections": IssueService(session).release_sections(project_id),
             },
         )
 
@@ -376,11 +506,13 @@ def create_app() -> FastAPI:
     def intake_view(request: Request, project_id: int, session: Session = Depends(get_session)):
         require_user(request, session)
         project = ProjectService(session).get_project(project_id)
-        workflow_summary = IssueService(session).workflow_summary(project_id)
+        issue_service = IssueService(session)
+        workflow_summary = issue_service.workflow_summary(project_id)
         intakes = [
             issue
-            for issue in IssueService(session).list_project_view(project_id, view="all")
-            if IssueService(session).workflow_state(issue) in {"intake", "clarify", "ready-for-codex"}
+            for issue in issue_service.list_project_view(project_id, view="all")
+            if issue_service.workflow_state(issue)
+            in {"needs-processing", "needs-clarification", "ready-for-codex"}
         ]
         return templates.TemplateResponse(
             request,
@@ -389,6 +521,8 @@ def create_app() -> FastAPI:
                 "request": request,
                 "project": project,
                 "workflow_summary": workflow_summary,
+                "workflow_labels": WORKFLOW_STATE_LABELS,
+                "workflow_states": {issue.id: issue_service.workflow_state(issue) for issue in intakes},
                 "intakes": intakes,
                 "error": None,
             },
@@ -447,11 +581,31 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/projects/{project_id}/sprints", response_class=HTMLResponse)
-    def sprints_view(request: Request, project_id: int, session: Session = Depends(get_session)):
+    def sprints_view(
+        request: Request,
+        project_id: int,
+        history: bool = False,
+        sprint_q: str = "",
+        session: Session = Depends(get_session),
+    ):
         require_user(request, session)
         project = ProjectService(session).get_project(project_id)
         issue_service = IssueService(session)
         repo = Repository(session)
+        rollups = issue_service.sprint_rollups(project_id)
+        visible_rollups = [
+            item for item in rollups if item["sprint"].status.value != "closed"
+        ]
+        history_rollups = [
+            item for item in rollups if item["sprint"].status.value == "closed"
+        ]
+        if sprint_q.strip():
+            needle = sprint_q.strip().lower()
+            history_rollups = [
+                item
+                for item in history_rollups
+                if needle in item["sprint"].goal.lower() or needle in display_id(item["sprint"].sequence)
+            ]
         return templates.TemplateResponse(
             request,
             "sprints.html",
@@ -459,7 +613,10 @@ def create_app() -> FastAPI:
                 "request": request,
                 "project": project,
                 "sprints": repo.list_project_sprints(project_id),
-                "rollups": issue_service.sprint_rollups(project_id),
+                "rollups": visible_rollups,
+                "history_rollups": history_rollups,
+                "show_history": history,
+                "sprint_query": sprint_q,
                 "backlog": issue_service.list_project_view(project_id, view="backlog"),
             },
         )
@@ -595,6 +752,7 @@ def create_app() -> FastAPI:
         request: Request,
         issue_id: int,
         sprint_id: int = Form(...),
+        return_to: str = Form(""),
         session: Session = Depends(get_session),
     ):
         require_user(request, session)
@@ -604,7 +762,12 @@ def create_app() -> FastAPI:
             context = issue_detail_context(session, issue_id, error=str(exc))
             context["request"] = request
             return templates.TemplateResponse(request, "issue_detail.html", context, status_code=400)
-        return RedirectResponse(f"/issues/{issue_id}", status_code=HTTP_303_SEE_OTHER)
+        issue = IssueService(session).get_issue(issue_id)
+        fallback = f"/issues/{issue_id}" if not return_to else f"/projects/{issue.project_id}/board"
+        return RedirectResponse(
+            local_redirect_target(return_to, fallback),
+            status_code=HTTP_303_SEE_OTHER,
+        )
 
     @app.post("/issues/{issue_id}/comments")
     def add_issue_comment(
@@ -639,6 +802,7 @@ def create_app() -> FastAPI:
         issue_id: int,
         status: str = Form(...),
         priority: str = Form(""),
+        return_to: str = Form(""),
         session: Session = Depends(get_session),
     ):
         username = require_user(request, session)
@@ -649,7 +813,10 @@ def create_app() -> FastAPI:
             priority=priority or issue.priority,
             actor=username,
         )
-        return RedirectResponse(f"/projects/{issue.project_id}", status_code=HTTP_303_SEE_OTHER)
+        return RedirectResponse(
+            local_redirect_target(return_to, f"/projects/{issue.project_id}"),
+            status_code=HTTP_303_SEE_OTHER,
+        )
 
     @app.post("/projects/{project_id}/backlog/reorder")
     def reorder_backlog(
@@ -697,14 +864,20 @@ def create_app() -> FastAPI:
                                 status_code=400,
                             )
                         project = ProjectService(session).get_project(project_id)
+                        issue_service = IssueService(session)
+                        intakes = issue_service.list_project_view(project_id, view="all")
                         return templates.TemplateResponse(
                             request,
                             "intake.html",
                             {
                                 "request": request,
                                 "project": project,
-                                "workflow_summary": IssueService(session).workflow_summary(project_id),
-                                "intakes": IssueService(session).list_project_view(project_id, view="all"),
+                                "workflow_summary": issue_service.workflow_summary(project_id),
+                                "workflow_labels": WORKFLOW_STATE_LABELS,
+                                "workflow_states": {
+                                    issue.id: issue_service.workflow_state(issue) for issue in intakes
+                                },
+                                "intakes": intakes,
                                 "error": "Audio upload is limited to 25 MB",
                             },
                             status_code=400,
@@ -864,6 +1037,12 @@ def create_app() -> FastAPI:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return app
+
+
+def _route_template(request: Request) -> str:
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    return path if isinstance(path, str) else "unmatched"
 
 
 app = create_app()

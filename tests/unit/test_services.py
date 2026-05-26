@@ -59,6 +59,29 @@ def test_close_metadata_is_required_and_immutable(session):
         service.update_status(issue.id, "backlog")
 
 
+def test_cancelled_status_has_terminal_metadata_and_separate_saved_view(session):
+    project = ProjectService(session).create_project("Tracker")
+    service = IssueService(session)
+    cancelled = service.create_issue(project.id, "Won't do", "- [ ] cancelled")
+    service.create_issue(project.id, "Open", "- [ ] open")
+
+    closed = service.update_status(
+        cancelled.id,
+        "cancelled",
+        originating_llm="gpt-5.5",
+        closed_by="tester",
+        close_note="not worth doing",
+    )
+
+    assert closed.status == IssueStatus.CANCELLED
+    assert closed.closed_at is not None
+    assert [issue.title for issue in service.list_project_view(project.id, "cancelled")] == ["Won't do"]
+    assert [issue.title for issue in service.list_project_view(project.id, "not-in-sprint")] == ["Open"]
+    assert service.project_summary(project.id)["done_percent"] == 0
+    with pytest.raises(DomainError, match="immutable"):
+        service.update_status(cancelled.id, "backlog")
+
+
 def test_categories_are_project_scoped_not_peer_taxonomy_constants(session):
     first = ProjectService(session).create_project("Tracker")
     second = ProjectService(session).create_project("Other")
@@ -111,6 +134,7 @@ def test_saved_views_rollups_metadata_comments_and_references(session):
     blocker = service.create_issue(project.id, "Blocker", "- [ ] blocker", category_id=taxonomy[0].id)
     blocked = service.create_issue(project.id, "Blocked", "- [ ] blocked")
     done = service.create_issue(project.id, "Done", "- [ ] done")
+    not_in_sprint = service.create_issue(project.id, "Not sprinted", "- [ ] plan me")
 
     service.add_dependency(blocker.id, blocked.id)
     sprint = SprintService(session).create_sprint(project.id, "MVP")
@@ -131,6 +155,10 @@ def test_saved_views_rollups_metadata_comments_and_references(session):
     assert [issue.title for issue in service.list_project_view(project.id, "blocked")] == ["Blocked"]
     assert [issue.title for issue in service.list_project_view(project.id, "active-sprint")] == ["Blocked"]
     assert [issue.title for issue in service.list_project_view(project.id, "done")] == ["Done"]
+    assert [issue.title for issue in service.list_project_view(project.id, "not-in-sprint")] == [
+        "Blocker",
+        "Not sprinted",
+    ]
     assert service.project_summary(project.id)["blocked"] == 1
     dashboard = service.overview_dashboard(project.id)
     assert dashboard["delivery_phases"]["Build"] == 1
@@ -141,6 +169,7 @@ def test_saved_views_rollups_metadata_comments_and_references(session):
     assert service.get_issue(blocked.id).labels["custom_fields"] == {"risk": "medium"}
     assert service.activity_feed(project.id)[0].message
     assert linked.repo == "owner/repo"
+    assert not_in_sprint.status == IssueStatus.BACKLOG
 
 
 def test_issue_log_agent_failure_and_bug_patterns(session):
@@ -221,8 +250,10 @@ def test_release_workflow_and_voice_intake_metadata(session, tmp_path):
     assert releases["MVP release"]["readiness_notes"] == ["route tests passing"]
     assert releases["v1.0"]["blocked"] == 1
     assert releases["v1.0"]["unscheduled"] == 1
-    assert service.workflow_state(second) == "clarify"
-    assert service.workflow_state(intake) == "clarify"
+    assert releases["v1.0"]["section"] == "current"
+    assert service.release_sections(project.id)["current"][0]["name"] == "v1.0"
+    assert service.workflow_state(second) == "needs-clarification"
+    assert service.workflow_state(intake) == "needs-clarification"
     assert intake.labels["custom_fields"]["intake_type"] == "voice-feedback"
 
 
@@ -242,7 +273,7 @@ def test_audio_only_urgent_voice_intake_gets_processable_title_and_priority(sess
     assert intake.priority == "urgent"
     assert "Audio-only urgent voice note" in intake.summary
     assert "urgent" in intake.labels["items"]
-    assert intake.labels["custom_fields"]["workflow_state"] == "intake"
+    assert intake.labels["custom_fields"]["workflow_state"] == "needs-processing"
 
 
 def test_audio_only_voice_intake_gets_processable_title_without_priority(session, tmp_path):
@@ -259,4 +290,22 @@ def test_audio_only_voice_intake_gets_processable_title_without_priority(session
 
     assert intake.title == "Voice feedback: To process: audio note"
     assert intake.priority == "normal"
-    assert intake.labels["custom_fields"]["workflow_state"] == "intake"
+    assert intake.labels["custom_fields"]["workflow_state"] == "needs-processing"
+
+
+def test_voice_intake_discard_rejects_durable_work(session, tmp_path):
+    project = ProjectService(session).create_project("Tracker")
+    service = IssueService(session)
+    intake = service.create_voice_intake(
+        project.id,
+        "",
+        "",
+        tmp_path / "audio.webm",
+        ambiguous=False,
+        actor="tester",
+    )
+    sprint = SprintService(session).create_sprint(project.id, "Process intake")
+    SprintService(session).add_issue(sprint.id, intake.id)
+
+    with pytest.raises(DomainError, match="Durable work"):
+        service.delete_voice_intake(intake.id, actor="tester")

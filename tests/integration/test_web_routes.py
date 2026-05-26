@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import io
+import json
+import logging
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from issue_tracker.db import get_session
 from issue_tracker.domain.models import Issue
+from issue_tracker.logging import JsonFormatter
 from issue_tracker.services.guidance_sync import GuidanceSyncService
 from issue_tracker.services.tracker import IssueLogService
 from issue_tracker.web.app import create_app
@@ -58,6 +63,39 @@ def test_login_errors_and_rate_limit_are_visible(engine):
 
     assert limited.status_code == 429
     assert "Too many attempts" in limited.text
+
+
+def test_request_logging_uses_route_template_without_query_payload(engine):
+    client, _ = make_client(engine)
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        JsonFormatter(app="issue-tracker", service="app", source="app-log", environment="test")
+    )
+    logger = logging.getLogger("issue_tracker.web")
+    old_handlers = logger.handlers[:]
+    old_level = logger.level
+    old_propagate = logger.propagate
+    try:
+        logger.handlers = [handler]
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+
+        response = client.get("/login?password=secret&token=abc")
+
+        assert response.status_code == 200
+        lines = [json.loads(line) for line in stream.getvalue().splitlines()]
+        request_log = next(entry for entry in lines if entry.get("event") == "http_request")
+        assert request_log["method"] == "GET"
+        assert request_log["route"] == "/login"
+        assert request_log["status_code"] == 200
+        assert "password" not in stream.getvalue()
+        assert "token" not in stream.getvalue()
+        assert "secret" not in stream.getvalue()
+    finally:
+        logger.handlers = old_handlers
+        logger.setLevel(old_level)
+        logger.propagate = old_propagate
 
 
 def test_project_page_validation_errors_preserve_context(engine):
@@ -137,7 +175,7 @@ def test_web_mvp_project_issue_dependency_sprint_close_flow(engine):
     refreshed_project = client.get(project_path)
     assert "MVP" in refreshed_project.text
     assert sprint_path in refreshed_project.text
-    assert "Lifecycle dashboard" in refreshed_project.text
+    assert "Workflow command center" in refreshed_project.text
     assert "Blocked work" in refreshed_project.text
     assert "0002 Blocked" in refreshed_project.text
     assert "0001 Blocker" in refreshed_project.text
@@ -264,13 +302,20 @@ def test_saved_views_search_backlog_board_and_inline_updates(engine):
 
     client.post(f"/issues/{active.id}/status", data={"status": "in-progress", "priority": "high"})
     backlog_view = client.get(f"{project_path}/backlog")
+    not_in_sprint_view = client.get(f"{project_path}/backlog?view=not-in-sprint")
+    done_view = client.get(f"{project_path}/backlog?view=done")
     board_view = client.get(f"{project_path}/board")
     filtered = client.get(f"{project_path}?view=backlog&q=Backlog")
 
     assert "Saved views" in backlog_view.text
+    assert "/projects/1/backlog?view=not-in-sprint" in backlog_view.text
+    assert "Issues Not In Sprint" in backlog_view.text
     assert "Backlog order" in backlog_view.text
     assert "draggable" in backlog_view.text
-    assert "Tracker board" in board_view.text
+    assert "Active item" in not_in_sprint_view.text
+    assert "Backlog item" in not_in_sprint_view.text
+    assert "No issues found for the done saved view" in done_view.text
+    assert "Tracker Sprint Board" in board_view.text
     assert "Active item" in board_view.text
     assert "Backlog item" in filtered.text
     assert "Active item" not in filtered.text
@@ -312,6 +357,7 @@ def test_release_intake_sprint_assignment_and_board_filters(engine):
     assigned = client.post(f"/issues/{first.id}/sprints", data={"sprint_id": sprint_id}, follow_redirects=False)
     workflow = client.post(f"/issues/{second.id}/workflow", data={"workflow_state": "clarify"}, follow_redirects=False)
     releases = client.get(f"{project_path}/releases")
+    release_drilldown = client.get(f"{project_path}/backlog?view=all&milestone=MVP%20release")
     board = client.get(f"{project_path}/board?sprint_id={sprint_id}")
     categories = client.get(f"{project_path}/categories")
     sprints = client.get(f"{project_path}/sprints")
@@ -321,6 +367,10 @@ def test_release_intake_sprint_assignment_and_board_filters(engine):
     assert workflow.status_code == 303
     assert "MVP release" in releases.text
     assert "tests pending" in releases.text
+    assert "Current" in releases.text
+    assert "1 total" in releases.text
+    assert "Release item" in release_drilldown.text
+    assert "Later item" not in release_drilldown.text
     assert "Release item" in board.text
     assert "Later item" in board.text
     assert "Assign backlog to sprint" in board.text
@@ -361,8 +411,8 @@ def test_release_intake_sprint_assignment_and_board_filters(engine):
     assert "Upload audio file" in intake_page.text
     assert "Voice feedback: Audio bug" in intake_page.text
     assert "Voice feedback: To process: urgent audio note" in intake_page.text
-    assert "clarify" in intake_page.text
-    assert "Not Done / Needs Clarifications" in client.get(f"/issues/{second.id}").text
+    assert "Needs clarification" in intake_page.text
+    assert "Needs clarification" in client.get(f"/issues/{second.id}").text
 
 
 def test_issue_edit_metadata_comments_references_and_docs_surfaces(engine):
@@ -412,6 +462,18 @@ def test_issue_edit_metadata_comments_references_and_docs_surfaces(engine):
         data={"repo": "owner/repo", "url": "https://github.com/owner/repo/pull/1", "pr_number": "1"},
         follow_redirects=False,
     )
+    cancelled = client.post(
+        f"/issues/{issue.id}/edit",
+        data={
+            "title": "Edited",
+            "acceptance_criteria": "- [ ] new",
+            "priority": "high",
+            "summary": "Updated summary",
+            "proposed_approach": "Use forms",
+            "status": "cancelled",
+        },
+        follow_redirects=False,
+    )
     page = client.get(f"/issues/{issue.id}")
     planning = client.get(f"{project_path}/planning")
     backup = client.get(f"{project_path}/backup")
@@ -420,7 +482,10 @@ def test_issue_edit_metadata_comments_references_and_docs_surfaces(engine):
     assert metadata.status_code == 303
     assert comment.status_code == 303
     assert reference.status_code == 303
+    assert cancelled.status_code == 303
     assert "Edited" in page.text
+    assert "cancelled" in page.text
+    assert "Cancelled or marked won&#39;t do from web status control." in page.text
     assert "Modern UI" in page.text
     assert "Browser UAT needed" in page.text
     assert "owner/repo#1" in page.text

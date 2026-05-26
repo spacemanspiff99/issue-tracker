@@ -13,6 +13,7 @@ alwaysApply: false
 - Required settings include `DATABASE_URL`, `APP_SECRET_KEY`, `APP_BASE_URL`, `ADMIN_USERNAME`, `SESSION_COOKIE_SECURE`, `MCP_ENABLED`, and `LOG_LEVEL`.
 - If first-run setup supports `ADMIN_INITIAL_PASSWORD`, it must be one-time use and never logged.
 - Do not install missing host packages, CLIs, package-manager dependencies, or system tools from an agent session. If a required tool is missing, stop and ask the user to install or authenticate it manually, then continue after they confirm it is ready.
+- Do not run host-level Playwright installers such as `playwright install --with-deps` outside Docker. Browser runtime dependencies belong in the app image or an existing app container.
 
 ## Docker Compose
 
@@ -20,9 +21,13 @@ alwaysApply: false
 - Use `deployment/docker-compose.local.yml` for app plus local PostgreSQL.
 - Use `deployment/docker-compose.app.yml` for app-only deployment against an external PostgreSQL URL.
 - Build FastAPI images from an official Python base image and use exec-form commands.
+- Install Playwright browsers and their Linux runtime dependencies only inside the Docker image or app container. The Dockerfile may run `python -m playwright install --with-deps chromium`; Codex should not install those packages on the host.
 - Do not run Docker with `sudo`.
 - On the dev host, do not run Compose from a temporary worktree with the default project name if the live dev app uses the same compose file name/path convention. Use a unique `COMPOSE_PROJECT_NAME` for preflight containers, or run checks inside the existing dev project intentionally.
 - Preflight checks must not recreate, stop, or replace the user's live dev app container unless the user explicitly asks to restart dev.
+- Before expensive Docker builds, check host capacity with `df -h / /tmp` and Docker usage with `docker system df`.
+- After isolated preflight builds, failed builds, or Playwright/browser image rebuilds, clean up temporary images and unused build cache so browser layers do not fill the dev host. Prefer targeted cleanup such as `docker image rm <preflight-image>` and `docker builder prune`; use broad `docker system prune` only with explicit operator approval.
+- Never remove Docker volumes or project containers that may contain tracker data as part of image cleanup unless the target project and volume are explicitly named and confirmed.
 
 ## Migrations And Startup
 
@@ -65,6 +70,8 @@ alwaysApply: false
 Use the relevant subset before completion:
 
 ```bash
+df -h / /tmp
+docker system df
 python -m pytest tests/
 alembic upgrade head
 docker compose -f deployment/docker-compose.local.yml up --build

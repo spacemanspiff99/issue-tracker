@@ -1,12 +1,13 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
 <div class="page-surface sprint-detail-page">
 <header class="page-title-row">
   <div>
-    <h1>Sprint {{ display_id(sprint.sequence) }}: {{ sprint.goal }}</h1>
+    <h1>Sprint {{ display_id(sprint.sequence) }}: {{ sprint.goal }} {{ info_tip("Sprint detail preserves prompt context, assigned issues, blockers, and a direct board URL.") }}</h1>
     <p>Status: <span class="badge state-{{ sprint.status.value }}">{{ sprint.status.value }}</span></p>
   </div>
-  <a class="button-link" href="/projects/{{ sprint.project_id }}/board?sprint_id={{ sprint.id }}">Board</a>
+  <a class="button-link" href="/projects/{{ sprint.project_id }}/board?sprint_id={{ sprint.id }}">Sprint Board</a>
 </header>
 <div class="metrics">
   <div class="metric"><strong>{{ rollup.total }}</strong><span class="muted">assigned</span></div>
