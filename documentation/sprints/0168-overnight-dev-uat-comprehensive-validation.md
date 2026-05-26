@@ -179,7 +179,7 @@ Add timestamped entries here as phases run.
 - 2026-05-26: Phase A passed. Recovered host disk from 97% used and 1.1G free to 48% used and 16G free by removing obsolete isolated preflight images and unused Docker build cache. Live dev containers and tracker data volume were preserved.
 - 2026-05-26: Updated process guidance to clarify that Playwright browser dependencies are installed inside the Docker image or app container, never on the host from an agent session.
 - 2026-05-26: Phase B passed. Fresh isolated preflight evidence is recorded in `documentation/uat/2026-05-26-sprint-0168-dev-preflight.md`: compose config, Docker build, empty DB migration, full tests, `/health`, MCP smoke, browser UAT, ruff, compile, and isolated cleanup all passed.
-- 2026-05-26: Phase D passed for source-control publication. Committed and pushed `a031ded4d5cc12931d164216175a89acfa10260f` to `origin/deploy/app-host-targets-0112`. Local and remote refs match. Note: `origin/dev` remains at `836a1be69eef07b31f223fee9229507899e842c9`; the tested/pushed UAT candidate is the deployment branch SHA, not the current `dev` branch head.
+- 2026-05-26: Phase D passed for source-control publication. Committed and pushed the tested state to `origin/deploy/app-host-targets-0112`. Before UAT dispatch, re-read `git rev-parse HEAD` and `git ls-remote origin refs/heads/deploy/app-host-targets-0112`; use only the exact matching SHA as `expected_deploy_sha`. Note: `origin/dev` was observed at `836a1be69eef07b31f223fee9229507899e842c9`; the tested/pushed UAT candidate is the deployment branch, not the current `dev` branch head.
 
 ## UAT Deploy Gate
 
@@ -187,7 +187,7 @@ Prepared operation:
 
 - Workflow: `.github/workflows/local-pipeline.yml` (`App Deploy Pipeline`; listed by `gh workflow list` as `Local Dev UAT Pipeline`).
 - Ref: `deploy/app-host-targets-0112`.
-- Expected deploy SHA: `a031ded4d5cc12931d164216175a89acfa10260f`.
+- Expected deploy SHA: use the exact final `git rev-parse HEAD` value after all source-control commits are complete and after confirming the remote ref matches.
 - Target: UAT host `192.168.10.26`, deploy path `/home/akun/issue-tracker`, user `akun`.
 - Production deploy: `false`.
 - Data policy: code deploy only; preserve existing UAT database by default. Do not overwrite, restore, reset, or refresh UAT data.
@@ -203,10 +203,10 @@ gh workflow run local-pipeline.yml \
   -f deploy_path=/home/akun/issue-tracker \
   -f prod_env_file=/home/akun/issue-tracker/prod.env \
   -f deploy_prod=false \
-  -f expected_deploy_sha=a031ded4d5cc12931d164216175a89acfa10260f
+  -f expected_deploy_sha=<exact-current-sha>
 ```
 
-STOP: Do not dispatch this workflow until the user explicitly approves deploying this exact ref/SHA to UAT with UAT data preserved.
+STOP: Do not dispatch this workflow until the exact final ref/SHA is stated and the user explicitly approves deploying that exact ref/SHA to UAT with UAT data preserved.
 
 ## STOP
 
