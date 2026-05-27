@@ -15,8 +15,9 @@ BASE_URL = os.environ.get("UAT_BASE_URL", "http://127.0.0.1:8000")
 IGNORE_HTTPS_ERRORS = os.environ.get("UAT_IGNORE_HTTPS_ERRORS") == "1"
 USERNAME = os.environ.get("UAT_USERNAME", "uat-admin")
 PASSWORD = os.environ.get("UAT_PASSWORD", "uat-password")
-SCREENSHOT_DIR = Path("exports/browser-uat-0140")
-NOTE_PATH = Path("documentation/uat/2026-05-24-sprint-0140-usability-rescue.md")
+SCREENSHOT_DIR = Path("exports/browser-uat-0168")
+NOTE_PATH = Path("documentation/uat/2026-05-27-sprint-0168-uat-browser.md")
+AUTOSAVE_TIMEOUT_MS = 15_000
 CHROMIUM_ARGS = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
 if BASE_URL.startswith("http://") and "localhost" not in BASE_URL and "127.0.0.1" not in BASE_URL:
     CHROMIUM_ARGS.append(f"--unsafely-treat-insecure-origin-as-secure={BASE_URL}")
@@ -200,7 +201,7 @@ def run_desktop_workflow(page: Page) -> tuple[str, int, int, int]:
     expect(page.locator("#record-status")).to_have_text("Requesting microphone access...")
     expect(page.locator("#record-status")).to_have_text("Recording...")
     page.click("#record-stop")
-    expect(page.locator("#record-status")).to_have_text("Recording saved automatically.")
+    expect(page.locator("#record-status")).to_have_text("Recording saved automatically.", timeout=AUTOSAVE_TIMEOUT_MS)
     expect(page.locator("#record-preview")).to_be_visible()
     expect(page.locator("#record-saved")).to_contain_text("Saved automatically as")
     uploaded_audio = page.locator("#audio-input").evaluate(
@@ -232,12 +233,12 @@ def run_mobile_checks(page: Page, project_id: int, blocked_id: int) -> None:
 
 def write_uat_note(setup_note: str) -> None:
     NOTE_PATH.write_text(
-        f"""# Local UAT Notes: Sprint 0140 Usability Rescue Browser UAT
+        f"""# UAT Browser Notes: Sprint 0168 Overnight Dev/UAT Validation
 
-Date: 2026-05-24
+Date: 2026-05-27
 Tester: Codex Playwright in Docker
 Browser: Playwright Chromium inside the Docker app container
-Environment: Docker Compose local app and PostgreSQL
+Environment: UAT Docker Compose app and PostgreSQL
 
 ## Result
 
@@ -263,7 +264,7 @@ docker compose -f deployment/docker-compose.local.yml exec \
   app-https python -m pytest tests/e2e/test_browser_uat.py
 ```
 
-Screenshots were generated under ignored local path `exports/browser-uat-0140/`.
+Screenshots were generated under ignored local path `exports/browser-uat-0168/`.
 
 ## Covered Paths
 
