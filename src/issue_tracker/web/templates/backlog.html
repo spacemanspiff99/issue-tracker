@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% from "_components.html" import info_tip %}
+{% block body %}
+<div class="page-surface-wide backlog-page">
+  <header class="list-header">
+    <div>
+      <h1>Backlog</h1>
+      <span class="count-pill">{{ issues|length }} issues</span>
+    </div>
+    <div class="list-actions">
+      <form method="get" action="/projects/{{ project.id }}/backlog" class="plain-form list-search">
+        <input type="hidden" name="view" value="{{ view }}">
+        {% if selected_status %}<input type="hidden" name="status" value="{{ selected_status }}">{% endif %}
+        {% if selected_workflow_state %}<input type="hidden" name="workflow_state" value="{{ selected_workflow_state }}">{% endif %}
+        {% if selected_milestone %}<input type="hidden" name="milestone" value="{{ selected_milestone }}">{% endif %}
+        {% if selected_category_id %}<input type="hidden" name="category_id" value="{{ selected_category_id }}">{% endif %}
+        {% if unscheduled %}<input type="hidden" name="unscheduled" value="true">{% endif %}
+        <input name="q" value="{{ query }}" placeholder="Search backlog...">
+        <button type="submit">Search</button>
+      </form>
+      <a class="button-link" href="/projects/{{ project.id }}">Overview</a>
+    </div>
+  </header>
+
+  <section class="surface-card saved-views-card">
+    <div class="surface-card-header"><h2>Saved views {{ info_tip("Saved views stay on this backlog page and encode filters in the URL for human and AI handoff.") }}</h2></div>
+    <div class="saved-view-grid surface-card-body">
+      {% for saved_view in saved_views %}
+      <a class="{% if saved_view.key == view %}active{% endif %}" href="/projects/{{ project.id }}/backlog?view={{ saved_view.key }}">{{ saved_view.label }}</a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <form method="get" action="/projects/{{ project.id }}/backlog" class="filter-strip">
+    <input type="hidden" name="view" value="{{ view }}">
+    <label>Status {{ info_tip("Optional status filter layered on the selected saved view.") }}
+      <select name="status">
+        <option value="">Any status</option>
+        {% for option in status_options %}
+        <option value="{{ option.value }}" {% if selected_status == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Workflow {{ info_tip("Optional AI workflow filter for raw intake, clarification, readiness, execution, and closeout state.") }}
+      <select name="workflow_state">
+        <option value="">Any workflow</option>
+        {% for option in workflow_options %}
+        <option value="{{ option.value }}" {% if selected_workflow_state == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Category {{ info_tip("Filters to one project-scoped category while keeping the current saved view visible.") }}
+      <select name="category_id">
+        <option value="">Any category</option>
+        {% for category in categories %}
+        <option value="{{ category.id }}" {% if selected_category_id == category.id %}selected{% endif %}>{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Milestone {{ info_tip("Exact release/milestone metadata filter for shareable release drill-downs.") }}
+      <input name="milestone" value="{{ selected_milestone }}" placeholder="MVP release">
+    </label>
+    <label><input type="checkbox" name="unscheduled" value="true" {% if unscheduled %}checked{% endif %}> Unscheduled</label>
+    <label>Search <input name="q" value="{{ query }}"></label>
+    <button type="submit">Apply filters</button>
+  </form>
+
+  <form method="post" action="/projects/{{ project.id }}/backlog/reorder" id="backlog-order-form" class="plain-form backlog-order-shell">
+    <input type="hidden" name="ordered_issue_ids" id="ordered-issue-ids" value="{% for issue in issues %}{{ issue.id }}{% if not loop.last %},{% endif %}{% endfor %}">
+    <div class="backlog-list-header">
+      <span></span>
+      <span>ID</span>
+      <span>Title</span>
+      <span>Status</span>
+      <span>Category</span>
+      <span>Pri</span>
+      <span>Deps</span>
+    </div>
+    <ol class="backlog-list sortable-list" id="backlog-sort-list" aria-label="Backlog order">
+      {% for issue in issues %}
+      {% set state = workflow_states.get(issue.id, issue.status.value) %}
+      {% set health = dependency_health[issue.id] %}
+      <li draggable="true" data-issue-id="{{ issue.id }}" class="backlog-row">
+        <span class="drag-handle">::</span>
+        <a class="issue-id" href="/issues/{{ issue.id }}">#{{ display_id(issue.sequence) }}</a>
+        <a class="backlog-title" href="/issues/{{ issue.id }}">{{ issue.title }}</a>
+        <span class="badge state-{{ issue.status.value }}">{{ status_labels[issue.status.value] }}</span>
+        <span class="badge state-{{ state }}">{{ workflow_labels.get(state, state|replace('-', ' ')) }}</span>
+        <span class="category-chip">{{ issue.category.name if issue.category else "Uncategorized" }}</span>
+        <form method="post" action="/issues/{{ issue.id }}/status" class="plain-form inline-edit">
+          <input type="hidden" name="status" value="{{ issue.status.value }}">
+          <select name="priority" aria-label="Priority for {{ display_id(issue.sequence) }}">
+            {% for priority in ["low", "normal", "high", "urgent"] %}
+            <option value="{{ priority }}" {% if issue.priority == priority %}selected{% endif %}>{{ priority }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Save</button>
+        </form>
+        <span class="dependency-icons">
+          {% if health.blocked %}<span title="Blocked">!</span>{% endif %}
+          {% if health.open_blockers or health.blocking %}<span title="Dependencies">link</span>{% endif %}
+          {% if not health.blocked and not health.open_blockers and not health.blocking %}<span class="muted">clear</span>{% endif %}
+        </span>
+      </li>
+      {% else %}
+      <li class="muted empty-row">No issues found for the {{ view }} saved view. Adjust filters or create matching backlog work.</li>
+      {% endfor %}
+    </ol>
+    <div class="save-row">
+      <button class="primary-action" type="submit">Save Order</button>
+    </div>
+  </form>
+</div>
+<script>
+  const sortList = document.getElementById("backlog-sort-list");
+  const orderedInput = document.getElementById("ordered-issue-ids");
+  if (sortList && orderedInput) {
+    const syncOrder = () => {
+      orderedInput.value = [...sortList.querySelectorAll("[data-issue-id]")]
+        .map((item) => item.dataset.issueId)
+        .join(",");
+    };
+    sortList.addEventListener("dragstart", (event) => {
+      event.target.closest("[data-issue-id]")?.classList.add("dragging");
+    });
+    sortList.addEventListener("dragend", (event) => {
+      event.target.closest("[data-issue-id]")?.classList.remove("dragging");
+      syncOrder();
+    });
+    sortList.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const dragging = sortList.querySelector(".dragging");
+      const target = event.target.closest("[data-issue-id]");
+      if (dragging && target && dragging !== target) {
+        const afterTarget = event.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2;
+        sortList.insertBefore(dragging, afterTarget ? target.nextSibling : target);
+      }
+    });
+  }
+</script>
+{% endblock %}

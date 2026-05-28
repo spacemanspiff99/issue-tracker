@@ -8,6 +8,8 @@ Source six-pager: `documentation/planning/AI_CODING_WORKFLOW_UX_SIX_PAGER.md`
 
 Tracker backlog created: `0154` through `0167`
 
+Follow-on overnight execution sprint: `documentation/sprints/0168-overnight-dev-uat-comprehensive-validation.md`
+
 Recommended model/reasoning: GPT-5.5 `high`
 
 Use high reasoning because the plan touches workflow state, schema/backfill decisions, route and MCP contracts, MagicPatterns-protected UI surfaces, data cleanup, and manual UAT readiness.
@@ -271,6 +273,11 @@ The app is ready for manual UAT when:
 - Local preflight build, migration, full pytest, health, MCP, and browser gates pass.
 - A written UAT note records pass/fail evidence and exact remaining risks.
 - No destructive data refresh, UAT deploy, production deploy, or remote mutation is implied by this plan.
+
+## Execution Evidence
+
+- 2026-05-26: Follow-on overnight sprint `0168` was created to finish dev readiness, source-control closeout, UAT deploy, and comprehensive UAT.
+- 2026-05-26: Local dev preflight passed in the `0168` sprint. Evidence is recorded in `documentation/uat/2026-05-26-sprint-0168-dev-preflight.md`.
 
 ## STOP
 

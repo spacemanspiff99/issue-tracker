@@ -1,16 +1,120 @@
 {% extends "base.html" %}
+{% from "_components.html" import info_tip %}
 {% block body %}
-<p><a href="/">Projects</a></p>
-<h1>{{ project.name }}</h1>
+<div class="page-surface overview-page">
+<header class="page-title-row">
+  <div>
+    <h1>{{ project.name }} {{ info_tip("Overview cards link to filtered backlog or board URLs so the same state can be reopened by a human or AI agent.") }}</h1>
+    <p>Local-first project tracker for steering AI coding work.</p>
+  </div>
+  <div class="row">
+    <a class="button-link" href="/projects/{{ project.id }}/intake">Voice Intake</a>
+    <a class="button-link magic-button" href="#quick-create">New Issue</a>
+  </div>
+</header>
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
-<h2>Create issue</h2>
+<div class="nav-list">
+  <a href="/projects/{{ project.id }}">Overview</a>
+  <a href="/projects/{{ project.id }}/intake">Intake</a>
+  <a href="/projects/{{ project.id }}/backlog">Backlog</a>
+  <a href="/projects/{{ project.id }}/board">Sprint Board</a>
+  <a href="/projects/{{ project.id }}/sprints">Sprints</a>
+  <a href="/projects/{{ project.id }}/releases">Releases</a>
+  <a href="/projects/{{ project.id }}/categories">Categories</a>
+  <a href="/projects/{{ project.id }}/guidance-sync">Guidance Sync</a>
+  <a href="/projects/{{ project.id }}/planning">Planning</a>
+  <a href="/projects/{{ project.id }}/backup">Backup</a>
+</div>
+<div class="metrics">
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=all"><strong>{{ summary.total }}</strong><span class="muted">issues</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=done"><strong>{{ summary.done_percent }}%</strong><span class="muted">done</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=blocked"><strong>{{ summary.blocked }}</strong><span class="muted">blocked</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=uncategorized"><strong>{{ summary.uncategorized }}</strong><span class="muted">uncategorized</span></a>
+</div>
+<h2>AI workflow {{ info_tip("Workflow states identify raw intake, clarification, ready-for-Codex work, implementation, verification, and closed records.") }}</h2>
+<div class="metrics">
+  {% for state, count in workflow_summary.items() %}
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view={{ state }}"><strong>{{ count }}</strong><span class="muted">{{ overview_dashboard.workflow_labels[state] }}</span></a>
+  {% endfor %}
+</div>
+<h2>Workflow command center</h2>
+<div class="metrics">
+  {% for status, count in overview_dashboard.status_counts.items() %}
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view={{ status if status in ['done', 'cancelled'] else 'all' }}&status={{ status }}"><strong>{{ count }}</strong><span class="muted">{{ overview_dashboard.status_labels[status] }}</span></a>
+  {% endfor %}
+  {% for phase, count in overview_dashboard.delivery_phases.items() %}
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=all&q={{ phase|urlencode }}"><strong>{{ count }}</strong><span class="muted">{{ phase }}</span></a>
+  {% endfor %}
+  {% if overview_dashboard.active_sprint %}
+  <a class="metric" href="/projects/{{ project.id }}/board?sprint_id={{ overview_dashboard.active_sprint.id }}"><strong>{{ display_id(overview_dashboard.active_sprint.sequence) }}</strong><span class="muted">active sprint</span></a>
+  <a class="metric" href="/projects/{{ project.id }}/backlog?view=active-sprint"><strong>{{ overview_dashboard.active_sprint_total }}</strong><span class="muted">sprint issues</span></a>
+  {% else %}
+  <div class="metric"><strong>0</strong><span class="muted">active sprint</span></div>
+  {% endif %}
+</div>
+<h2>Blocked work</h2>
+<table>
+  <tr><th>Issue</th><th>Blocked by</th><th>Reason</th></tr>
+  {% for item in overview_dashboard.blocked_items %}
+  <tr>
+    <td><a href="/issues/{{ item.issue.id }}">{{ display_id(item.issue.sequence) }} {{ item.issue.title }}</a></td>
+    <td>{% for blocker in item.blockers %}<a class="badge" href="/issues/{{ blocker.id }}">{{ display_id(blocker.sequence) }}</a> {% endfor %}</td>
+    <td>{{ item.reason }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No blocked issues.</td></tr>
+  {% endfor %}
+</table>
+<div class="panel">
+  <h2>Voice feedback intake</h2>
+  <p class="muted">Record or upload audio bug reports and feature requests, then process them into build-ready issues.</p>
+  <a class="badge" href="/projects/{{ project.id }}/intake">Open audio intake</a>
+</div>
+<h2>Release readiness</h2>
+<table>
+  <tr><th>Release</th><th>Progress</th><th>Blocked</th><th>Unscheduled</th><th>Sprints</th></tr>
+  {% for release in release_rollups %}
+  <tr>
+    <td><a href="/projects/{{ project.id }}/releases">{{ release.name }}</a></td>
+    <td>{{ release.done }}/{{ release.total }} ({{ release.done_percent }}%)</td>
+    <td>{{ release.blocked }}</td>
+    <td>{{ release.unscheduled }}</td>
+    <td>{% for sprint in release.sprints %}<span class="badge">{{ display_id(sprint.sequence) }}</span> {% else %}<span class="muted">No sprint</span>{% endfor %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">No release metadata yet.</td></tr>
+  {% endfor %}
+</table>
+<h2>Saved views {{ info_tip("Saved views open the backlog route with visible query-string filters.") }}</h2>
+<div class="nav-list">
+  {% for saved_view in saved_views %}
+    {% if saved_view.key == view %}
+    <span class="active">{{ saved_view.label }}</span>
+    {% else %}
+    <a href="/projects/{{ project.id }}/backlog?view={{ saved_view.key }}">{{ saved_view.label }}</a>
+    {% endif %}
+  {% endfor %}
+</div>
+<form method="get" action="/projects/{{ project.id }}" class="row">
+  <input type="hidden" name="view" value="{{ view }}">
+  <label>Search issues <input name="q" value="{{ query }}" placeholder="Title, summary, category, acceptance criteria"></label>
+  <button type="submit">Search</button>
+</form>
+<h2 id="quick-create">Quick create</h2>
 <form method="post" action="/projects/{{ project.id }}/issues">
   <label>Title <input name="title" required></label>
+  <label>Priority
+    <select name="priority">
+      <option value="high">high</option>
+      <option value="normal" selected>normal</option>
+      <option value="low">low</option>
+    </select>
+  </label>
   <label>Category
     <select name="category_id">
       <option value="">None</option>
       {% for category in categories %}
-      <option value="{{ category.id }}">{{ category.key }} {{ category.name }}</option>
+      <option value="{{ category.id }}">{{ category.name }}</option>
       {% endfor %}
     </select>
   </label>
@@ -19,22 +123,122 @@
 </form>
 <h2>Issues</h2>
 <table>
-  <tr><th>ID</th><th>Title</th><th>Status</th><th>Priority</th></tr>
+  <tr><th>ID</th><th>Title</th><th>Status</th><th>Priority</th><th>Category</th><th>Blocked</th><th>Update</th></tr>
   {% for issue in issues %}
   <tr>
     <td>{{ display_id(issue.sequence) }}</td>
     <td><a href="/issues/{{ issue.id }}">{{ issue.title }}</a></td>
-    <td>{{ issue.status.value }}</td>
+    <td><span class="badge">{{ issue.status.value }}</span></td>
     <td>{{ issue.priority }}</td>
+    <td>{{ issue.category.key if issue.category else "Uncategorized" }}</td>
+    <td>{% if dependency_health[issue.id].blocked %}<span class="badge">blocked</span>{% else %}<span class="muted">clear</span>{% endif %}</td>
+    <td>
+      <form method="post" action="/issues/{{ issue.id }}/sprints" class="compact-form">
+        <label>Assign sprint
+          <select name="sprint_id">
+            {% for sprint in sprints if sprint.status.value != "closed" %}
+            <option value="{{ sprint.id }}">{{ display_id(sprint.sequence) }} {{ sprint.goal }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Assign</button>
+      </form>
+      <form method="post" action="/issues/{{ issue.id }}/status" class="compact-form">
+        <label>Status
+          <select name="status">
+            {% for status in status_options %}
+            <option value="{{ status.value }}" {% if issue.status.value == status.value %}selected{% endif %}>{{ status.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Priority <input name="priority" value="{{ issue.priority }}"></label>
+        <button type="submit">Update</button>
+      </form>
+    </td>
   </tr>
+  {% else %}
+  <tr><td colspan="7" class="muted">No issues yet.</td></tr>
   {% endfor %}
 </table>
-<h2>Sprint</h2>
-<form method="post" action="/projects/{{ project.id }}/sprints" class="row">
+{% if view == "backlog" %}
+<h2>Backlog order</h2>
+<form method="post" action="/projects/{{ project.id }}/backlog/reorder" id="backlog-order-form">
+  <input type="hidden" name="ordered_issue_ids" id="ordered-issue-ids" value="{% for issue in issues %}{{ issue.id }}{% if not loop.last %},{% endif %}{% endfor %}">
+  <ol class="sortable-list" id="backlog-sort-list">
+    {% for issue in issues %}
+    <li draggable="true" data-issue-id="{{ issue.id }}">{{ display_id(issue.sequence) }} {{ issue.title }}</li>
+    {% else %}
+    <li class="muted">No backlog issues to order.</li>
+    {% endfor %}
+  </ol>
+  <button type="submit">Save order</button>
+</form>
+<script>
+  const sortList = document.getElementById("backlog-sort-list");
+  const orderedInput = document.getElementById("ordered-issue-ids");
+  if (sortList && orderedInput) {
+    const syncOrder = () => {
+      orderedInput.value = [...sortList.querySelectorAll("[data-issue-id]")]
+        .map((item) => item.dataset.issueId)
+        .join(",");
+    };
+    sortList.addEventListener("dragstart", (event) => {
+      event.target.classList.add("dragging");
+    });
+    sortList.addEventListener("dragend", (event) => {
+      event.target.classList.remove("dragging");
+      syncOrder();
+    });
+    sortList.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const dragging = sortList.querySelector(".dragging");
+      const target = event.target.closest("[data-issue-id]");
+      if (dragging && target && dragging !== target) {
+        const afterTarget = event.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2;
+        sortList.insertBefore(dragging, afterTarget ? target.nextSibling : target);
+      }
+    });
+  }
+</script>
+{% endif %}
+<h2 id="sprints">Sprint</h2>
+<form method="post" action="/projects/{{ project.id }}/sprints">
+  <div class="row">
   <label>Goal <input name="goal" required></label>
   <button type="submit">Create sprint</button>
+  </div>
+  <label>Sprint prompt <textarea name="context" placeholder="Instructions, scope, verification gates, and STOP handoff for this sprint"></textarea></label>
 </form>
-<h2>Categories</h2>
+<table>
+  <tr><th>ID</th><th>Goal</th><th>Status</th></tr>
+  {% for sprint in sprints %}
+  <tr>
+    <td>{{ display_id(sprint.sequence) }}</td>
+    <td><a href="/sprints/{{ sprint.id }}">{{ sprint.goal }}</a></td>
+    <td><span class="badge">{{ sprint.status.value }}</span></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No sprints yet.</td></tr>
+  {% endfor %}
+</table>
+<h2>Sprint progress</h2>
+<table>
+  <tr><th>Sprint</th><th>Done</th><th>Blocked</th><th>Stories</th></tr>
+  {% for item in sprint_rollups %}
+  <tr>
+    <td><a href="/sprints/{{ item.sprint.id }}">{{ display_id(item.sprint.sequence) }} {{ item.sprint.goal }}</a></td>
+    <td>{{ item.done }}/{{ item.total }} ({{ item.done_percent }}%)</td>
+    <td>{{ item.blocked }}</td>
+    <td>{% for story, count in item.stories.items() %}<span class="badge">{{ story }}: {{ count }}</span> {% endfor %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">No sprint rollups yet.</td></tr>
+  {% endfor %}
+</table>
+<h2 id="categories">Categories</h2>
+<form method="post" action="/projects/{{ project.id }}/categories/base">
+  <button type="submit">Add recommended tracker taxonomy</button>
+</form>
 <form method="post" action="/projects/{{ project.id }}/categories">
   <div class="row">
     <label>Key <input name="key" required></label>
@@ -46,6 +250,16 @@
 <ul>
   {% for category in categories %}
   <li>{{ category.key }}: {{ category.name }}</li>
+  {% else %}
+  <li class="muted">No categories yet.</li>
+  {% endfor %}
+</ul>
+<h2>Activity</h2>
+<ul>
+  {% for event in activity %}
+  <li>{{ event.event_type }}: {{ event.message }} <span class="muted">{{ event.actor or "system" }}</span></li>
+  {% else %}
+  <li class="muted">No activity yet.</li>
   {% endfor %}
 </ul>
 <h2>Issue log</h2>
@@ -56,4 +270,5 @@
   <li class="muted">No issue log entries yet.</li>
   {% endfor %}
 </ul>
+  </div>
 {% endblock %}

@@ -10,16 +10,34 @@ Use this guide after the Docker runtime gate passes in `documentation/issues/000
 - Migrations have been run explicitly.
 - Tests pass through the app service.
 - The local stack is running at `http://localhost:8000`.
+- The host has enough free disk for a fresh image build and Playwright/browser layers.
 
 Commands:
 
 ```bash
-docker compose -f deployment/docker-compose.local.yml config
-docker compose -f deployment/docker-compose.local.yml build
-docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head
-docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/
+df -h / /tmp
+docker system df
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml config
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml build
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/
 docker compose -f deployment/docker-compose.local.yml up
 ```
+
+Use the isolated `COMPOSE_PROJECT_NAME`, `POSTGRES_CONTAINER_NAME`, and `APP_HTTP_PORT` values for temporary-worktree preflight on the dev host. Check `http://192.168.10.20:8000/health` before and after the preflight so the live dev app is not disrupted. Use the default `docker compose ... up` command only when intentionally running or restarting the normal local stack.
+
+Run Playwright and browser UAT inside the Docker image or app container. The image installs Chromium and its Linux runtime dependencies during the Docker build; do not run host-level `playwright install --with-deps` or install browser system packages on the dev host from an agent session.
+
+Cleanup after isolated preflight:
+
+```bash
+COMPOSE_PROJECT_NAME=issue_tracker_preflight POSTGRES_CONTAINER_NAME=issue-tracker-preflight-postgres APP_HTTP_PORT=18000 docker compose -f deployment/docker-compose.local.yml down -v
+docker image rm issue_tracker_preflight-app
+docker builder prune
+docker system df
+```
+
+Only run `down -v` against the isolated preflight project named above. Do not remove the default dev project, its containers, or any Docker volume that may contain tracker data unless that exact target has been explicitly confirmed. If disk is still tight, prefer naming and removing obsolete preflight images before considering broader Docker cleanup.
 
 Health check:
 

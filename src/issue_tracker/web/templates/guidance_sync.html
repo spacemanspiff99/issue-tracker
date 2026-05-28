@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "_components.html" import info_tip %}
+{% block body %}
+<div class="page-surface-wide">
+  <header class="page-title-row">
+    <div>
+      <h1>{{ project.name }} Guidance Sync {{ info_tip("Guidance Sync shows drift and proposals without mutating mirrored rules until reviewed.") }}</h1>
+      <p>Read-only guidance health, drift, proposals, and audit evidence.</p>
+    </div>
+  </header>
+
+  <div class="metrics">
+    <div class="metric"><strong>{{ dashboard.sources|length }}</strong><span class="muted">sources</span></div>
+    <div class="metric"><strong>{{ dashboard.drift_count }}</strong><span class="muted">open drift</span></div>
+    <div class="metric"><strong>{{ dashboard.scan_status }}</strong><span class="muted">scan status</span></div>
+    <div class="metric"><strong>{{ dashboard.proposals|length }}</strong><span class="muted">proposals</span></div>
+    <div class="metric"><strong>{{ rule_health.status }}</strong><span class="muted">rule relevance</span></div>
+  </div>
+
+  <h2>Rule relevance</h2>
+  <p>{{ rule_health.next }}</p>
+  <p class="muted">Critical rules: {{ rule_health.critical_rules|join(", ") }}</p>
+
+  <h2>Harnesses</h2>
+  <div class="nav-list">
+    <span>Codex</span>
+    <span>Cursor</span>
+    <span>Claude</span>
+    <span>Command policy</span>
+  </div>
+
+  <h2>Sources</h2>
+  <table>
+    <tr><th>Name</th><th>Repo</th><th>Default branch</th><th>Target</th><th>Status</th><th>Tracked paths</th></tr>
+    {% for source in dashboard.sources %}
+    <tr>
+      <td>{{ source.name }}</td>
+      <td>{{ source.repo_url }}</td>
+      <td>{{ source.default_branch }}</td>
+      <td>{{ source.vibecoding_target_path or "Not configured" }}</td>
+      <td><span class="badge">{{ source.scan_status }}</span></td>
+      <td>{{ (source.tracked_paths.get("paths") or [])|join(", ") }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">No guidance sources configured yet.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Drift</h2>
+  <table>
+    <tr><th>Path</th><th>Type</th><th>Severity</th><th>Recommended action</th><th>Summary</th></tr>
+    {% for drift in dashboard.drifts %}
+    <tr>
+      <td>{{ drift.path }}</td>
+      <td><span class="badge">{{ drift.drift_type }}</span></td>
+      <td>{{ drift.severity }}</td>
+      <td>{{ drift.recommended_action }}</td>
+      <td>{{ drift.summary }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No drift findings yet.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Proposals</h2>
+  <table>
+    <tr><th>ID</th><th>Action</th><th>Status</th><th>Issue</th><th>Verification</th></tr>
+    {% for proposal in dashboard.proposals %}
+    <tr>
+      <td>{{ proposal.id }}</td>
+      <td>{{ proposal.action }}</td>
+      <td><span class="badge">{{ proposal.status }}</span></td>
+      <td>{{ proposal.issue_id or "None" }}</td>
+      <td>{{ proposal.verification_command or "Not set" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No proposals yet.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Audit</h2>
+  <ul>
+    {% for audit in dashboard.audits %}
+    <li>{{ audit.event_type }}: {{ audit.summary }} <span class="muted">{{ audit.actor or "system" }}</span></li>
+    {% else %}
+    <li class="muted">No guidance sync audit entries yet.</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endblock %}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from issue_tracker.domain.enums import IssueStatus, SprintStatus
@@ -40,6 +40,23 @@ class Repository:
 
     def list_projects(self) -> list[Project]:
         return list(self.session.scalars(select(Project).order_by(Project.name)))
+
+    def search_projects(self, query: str) -> list[Project]:
+        term = f"%{query.strip()}%"
+        return list(
+            self.session.scalars(
+                select(Project)
+                .where(
+                    or_(
+                        Project.name.ilike(term),
+                        Project.repo_url.ilike(term),
+                        Project.tracker_path_hint.ilike(term),
+                        Project.rules_path_hint.ilike(term),
+                    )
+                )
+                .order_by(Project.name)
+            )
+        )
 
     def allocate_sequence(self, project_id: int) -> int:
         stmt: Select[tuple[Project]] = select(Project).where(Project.id == project_id).with_for_update()
@@ -81,6 +98,27 @@ class Repository:
             stmt = stmt.where(Issue.status == status)
         return list(self.session.scalars(stmt))
 
+    def list_project_issues(self, project_id: int) -> list[Issue]:
+        return list(
+            self.session.scalars(
+                select(Issue)
+                .options(selectinload(Issue.category))
+                .where(Issue.project_id == project_id)
+                .order_by(Issue.sequence)
+            )
+        )
+
+    def list_issue_events(self, project_id: int, limit: int = 50) -> list[IssueEvent]:
+        return list(
+            self.session.scalars(
+                select(IssueEvent)
+                .join(Issue, Issue.id == IssueEvent.issue_id)
+                .where(Issue.project_id == project_id)
+                .order_by(IssueEvent.created_at.desc(), IssueEvent.id.desc())
+                .limit(limit)
+            )
+        )
+
     def list_dependencies_for_issue(self, issue_id: int) -> list[IssueDependency]:
         return list(
             self.session.scalars(
@@ -117,10 +155,20 @@ class Repository:
             raise KeyError(f"Sprint {sprint_id} was not found")
         return sprint
 
+    def list_project_sprints(self, project_id: int) -> list[Sprint]:
+        return list(
+            self.session.scalars(
+                select(Sprint).where(Sprint.project_id == project_id).order_by(Sprint.sequence.desc())
+            )
+        )
+
     def active_sprint(self, project_id: int) -> Sprint | None:
+        return self.current_sprint(project_id)
+
+    def current_sprint(self, project_id: int) -> Sprint | None:
         return self.session.scalar(
             select(Sprint)
-            .where(Sprint.project_id == project_id, Sprint.status != SprintStatus.CLOSED)
+            .where(Sprint.project_id == project_id, Sprint.status == SprintStatus.ACTIVE)
             .order_by(Sprint.sequence.desc())
         )
 

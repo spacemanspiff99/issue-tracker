@@ -1,0 +1,106 @@
+name: App Deploy Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      uat_host:
+        description: UAT host
+        required: true
+        default: 192.168.10.26
+      prod_host:
+        description: Production host
+        required: true
+        default: 192.168.10.27
+      deploy_user:
+        description: SSH user on target hosts
+        required: true
+        default: akun
+      deploy_path:
+        description: Remote deployment path
+        required: true
+        default: /home/akun/issue-tracker
+      prod_env_file:
+        description: Remote production env file path on app-prod
+        required: true
+        default: /home/akun/issue-tracker/prod.env
+      deploy_prod:
+        description: Deploy to production after UAT passes
+        required: true
+        type: boolean
+        default: false
+      expected_deploy_sha:
+        description: Exact committed Git SHA expected to deploy
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-uat:
+    name: Deploy UAT
+    runs-on: [self-hosted, issue-tracker, local-dev]
+    environment: uat
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify deploy source
+        env:
+          EXPECTED_DEPLOY_SHA: ${{ inputs.expected_deploy_sha }}
+        run: |
+          echo "Deploying ref: $GITHUB_REF"
+          echo "Deploying sha: $GITHUB_SHA"
+          test "$GITHUB_SHA" = "$EXPECTED_DEPLOY_SHA"
+      - name: Deploy to app-uat
+        env:
+          DEPLOY_ENVIRONMENT: uat
+          APP_ENVIRONMENT: uat
+          EXPECTED_DEPLOY_SHA: ${{ inputs.expected_deploy_sha }}
+          TARGET_HOST: ${{ inputs.uat_host }}
+          EXPECTED_TARGET_HOST: 192.168.10.26
+          EXPECTED_TARGET_HOSTNAME: app-uat
+          TARGET_USER: ${{ inputs.deploy_user }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          APP_BASE_URL: http://${{ inputs.uat_host }}:8000
+          APP_HTTP_PORT: "8000"
+          RUN_BROWSER_UAT: "1"
+          RUN_TESTS: "1"
+          RUN_RUFF: "1"
+          SKIP_DB_BACKUP: "0"
+        run: bash deployment/scripts/remote-compose-deploy.sh
+
+  deploy-prod:
+    name: Deploy Production
+    runs-on: [self-hosted, issue-tracker, local-dev]
+    needs: deploy-uat
+    if: ${{ inputs.deploy_prod }}
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify deploy source
+        env:
+          EXPECTED_DEPLOY_SHA: ${{ inputs.expected_deploy_sha }}
+        run: |
+          echo "Deploying ref: $GITHUB_REF"
+          echo "Deploying sha: $GITHUB_SHA"
+          test "$GITHUB_SHA" = "$EXPECTED_DEPLOY_SHA"
+      - name: Deploy to app-prod
+        env:
+          DEPLOY_ENVIRONMENT: prod
+          APP_ENVIRONMENT: production
+          EXPECTED_DEPLOY_SHA: ${{ inputs.expected_deploy_sha }}
+          TARGET_HOST: ${{ inputs.prod_host }}
+          EXPECTED_TARGET_HOST: 192.168.10.27
+          EXPECTED_TARGET_HOSTNAME: app-prod
+          TARGET_USER: ${{ inputs.deploy_user }}
+          DEPLOY_PATH: ${{ inputs.deploy_path }}
+          REMOTE_ENV_FILE: ${{ inputs.prod_env_file }}
+          APP_BASE_URL: http://${{ inputs.prod_host }}:8000
+          APP_HTTP_PORT: "8000"
+          RUN_BROWSER_UAT: "0"
+          RUN_TESTS: "0"
+          RUN_RUFF: "0"
+          SKIP_DB_BACKUP: "0"
+        run: bash deployment/scripts/remote-compose-deploy.sh

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "_components.html" import info_tip %}
+{% block body %}
+<div class="page-surface">
+  <header class="page-title-row">
+    <div>
+      <h1>Categories {{ info_tip("Categories are project-scoped. The recommended taxonomy is short, but existing categories stay readable for history.") }}</h1>
+      <p>Project-scoped taxonomy with issue counts and prevention checklist ownership.</p>
+    </div>
+    <form method="post" action="/projects/{{ project.id }}/categories/base" class="plain-form">
+      <button class="primary-action" type="submit">Add recommended tracker taxonomy</button>
+    </form>
+  </header>
+
+  <section class="category-grid">
+    {% for category in categories %}
+    <article class="surface-card category-card">
+      <div class="surface-card-header">
+        <h2>{{ category.key }} {{ category.name }}</h2>
+        <a class="count-pill" href="/projects/{{ project.id }}/backlog?view=all&category_id={{ category.id }}">{{ issue_counts[category.id] }} issues</a>
+      </div>
+      <div class="surface-card-body">
+        <p>{{ category.description or "No description recorded." }}</p>
+        <pre>{{ category.checklist }}</pre>
+      </div>
+    </article>
+    {% else %}
+    <article class="surface-card">
+      <div class="surface-card-body muted">No categories yet.</div>
+    </article>
+    {% endfor %}
+    <article class="surface-card category-card">
+      <div class="surface-card-header">
+        <h2>Uncategorized</h2>
+        <a class="count-pill" href="/projects/{{ project.id }}/backlog?view=uncategorized">{{ uncategorized_count }} issues</a>
+      </div>
+      <div class="surface-card-body muted">Issues still needing category binding. Use the backlog uncategorized saved view to triage them.</div>
+    </article>
+  </section>
+
+  <section class="surface-card">
+    <div class="surface-card-header"><h2>Add category</h2></div>
+    <form method="post" action="/projects/{{ project.id }}/categories" class="surface-card-body">
+      <div class="row">
+        <label>Key <input name="key" required></label>
+        <label>Name <input name="name" required></label>
+      </div>
+      <label>Checklist <textarea name="checklist" required></textarea></label>
+      <button type="submit">Add category</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

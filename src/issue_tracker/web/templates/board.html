@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% from "_components.html" import info_tip %}
+{% block body %}
+{% set board_return = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
+<div class="page-surface-wide board-page">
+<header class="board-header">
+  <div>
+    <h1>{{ project.name }} Sprint Board {{ info_tip("The board defaults to the active sprint. Selecting a sprint writes sprint_id into the URL for deterministic handoff.") }}</h1>
+    <div class="sprint-nav-strip">
+      {% for sprint in sprint_navigation.current %}
+      <a class="badge state-active {% if sprint.id in selected_sprint_ids %}active{% endif %}" href="/projects/{{ project.id }}/board?sprint_id={{ sprint.id }}">Active #{{ display_id(sprint.sequence) }}</a>
+      {% endfor %}
+      {% for sprint in sprint_navigation.planned[:5] %}
+      <a class="badge state-planned {% if sprint.id in selected_sprint_ids %}active{% endif %}" href="/projects/{{ project.id }}/board?sprint_id={{ sprint.id }}">Planned #{{ display_id(sprint.sequence) }}</a>
+      {% endfor %}
+      <a class="badge" href="/projects/{{ project.id }}/board?all_sprints=true">All Work</a>
+      <details>
+        <summary>History</summary>
+        <div class="compact-list">
+          {% for sprint in sprint_navigation.history[:25] %}
+          <a href="/projects/{{ project.id }}/board?sprint_id={{ sprint.id }}">#{{ display_id(sprint.sequence) }} {{ sprint.goal }}</a>
+          {% else %}
+          <span class="muted">No closed sprint history.</span>
+          {% endfor %}
+        </div>
+      </details>
+    </div>
+  </div>
+  <div class="board-actions">
+    <a class="button-link" href="/projects/{{ project.id }}/backlog">Backlog</a>
+    {% if selected_sprint_ids %}
+    <form method="post" action="/sprints/{{ selected_sprint_ids[0] }}/issues/reorder" id="sprint-order-form" class="plain-form">
+      <input type="hidden" name="ordered_issue_ids" id="ordered-sprint-issue-ids" value="">
+      <button type="submit">Save visible sprint order</button>
+    </form>
+    {% endif %}
+  </div>
+</header>
+<div class="board">
+  {% for status, issues in columns.items() %}
+  <section class="board-column drop-zone" data-status="{{ status }}">
+    <h2><span><span class="state-dot state-{{ status }}"></span>{{ status_labels[status] }}</span><span class="count-pill">{{ issues|length }}</span></h2>
+    {% for issue in issues %}
+    <article class="issue-card" draggable="true" data-issue-id="{{ issue.id }}">
+      <div class="issue-card-top">
+        <a class="issue-id" href="/issues/{{ issue.id }}">#{{ display_id(issue.sequence) }}</a>
+        <span class="priority-dot priority-{{ issue.priority }}" title="{{ issue.priority }}"></span>
+      </div>
+      <a class="card-title" href="/issues/{{ issue.id }}">{{ issue.title }}</a>
+      <p><span class="badge">{{ issue.category.key if issue.category else "Uncategorized" }}</span></p>
+      <form method="post" action="/issues/{{ issue.id }}/status" class="compact-form">
+        <input type="hidden" name="priority" value="{{ issue.priority }}">
+        <input type="hidden" name="return_to" value="{{ board_return }}">
+        <label>Move
+          <select name="status">
+            {% for option in status_options %}
+            <option value="{{ option.value }}" {% if option.value == status %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Apply</button>
+      </form>
+    </article>
+    {% else %}
+    <p class="muted">No issues in this column.</p>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</div>
+<h2>Assign backlog to sprint</h2>
+<table>
+  <tr><th>Issue</th><th>Assign</th></tr>
+  {% for issue in backlog %}
+  <tr>
+    <td><a href="/issues/{{ issue.id }}">{{ display_id(issue.sequence) }} {{ issue.title }}</a></td>
+    <td>
+      <form method="post" action="/issues/{{ issue.id }}/sprints" class="compact-form">
+        <input type="hidden" name="return_to" value="{{ board_return }}">
+        <label>Sprint
+          <select name="sprint_id">
+            {% for sprint in sprints if sprint.status.value != "closed" %}
+            <option value="{{ sprint.id }}">{{ display_id(sprint.sequence) }} {{ sprint.goal }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Assign</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="2" class="muted">No backlog issues to assign.</td></tr>
+  {% endfor %}
+</table>
+  </div>
+<script>
+  const sprintOrderInput = document.getElementById("ordered-sprint-issue-ids");
+  const syncSprintOrder = () => {
+    if (!sprintOrderInput) return;
+    sprintOrderInput.value = [...document.querySelectorAll("[data-issue-id]")]
+      .map((item) => item.dataset.issueId)
+      .join(",");
+  };
+  document.querySelectorAll("[data-issue-id]").forEach((card) => {
+    card.addEventListener("dragstart", () => card.classList.add("dragging"));
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+      syncSprintOrder();
+    });
+  });
+  document.querySelectorAll(".drop-zone").forEach((zone) => {
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      const dragging = document.querySelector(".dragging");
+      const target = event.target.closest("[data-issue-id]");
+      if (!dragging || !target || dragging === target) return;
+      const afterTarget = event.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2;
+      zone.insertBefore(dragging, afterTarget ? target.nextSibling : target);
+    });
+  });
+  syncSprintOrder();
+</script>
+{% endblock %}

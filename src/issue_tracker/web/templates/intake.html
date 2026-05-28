@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% from "_components.html" import info_tip %}
+{% block body %}
+<div class="page-surface intake-page">
+  <header class="page-title-row">
+    <div>
+      <h1>Voice Intake {{ info_tip("Recording gives immediate state feedback. If browser recording is unavailable, upload fallback still creates the same intake issue.") }}</h1>
+      <p>Record rough feedback or ideas to be processed into actionable work.</p>
+    </div>
+  </header>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form method="post" action="/projects/{{ project.id }}/voice-feedback" enctype="multipart/form-data" class="intake-form">
+    <label>Title <input name="title" placeholder="Brief summary of the feedback..."></label>
+    <label>Priority
+      <select name="priority">
+        <option value="low">Low</option>
+        <option value="normal" selected>Normal</option>
+        <option value="high">High</option>
+        <option value="urgent">Urgent</option>
+      </select>
+    </label>
+
+    <section class="audio-panel">
+      <h2>Audio Recording {{ info_tip("Stop attaches a non-empty recording, shows playback, and autosaves a discoverable voice-feedback issue.") }}</h2>
+      <div class="audio-grid">
+        <div class="record-area">
+          <button type="button" id="record-start" class="record-button">Record audio</button>
+          <button type="button" id="record-stop" disabled>Stop recording</button>
+          <button type="button" id="record-continue" disabled>Continue recording</button>
+          <button type="button" id="record-start-over" disabled>Start over</button>
+          <button type="button" id="record-delete" disabled>Delete recording</button>
+          <p id="record-status" class="muted" aria-live="polite" data-state="idle">Recording is idle.</p>
+          <p id="record-saved" class="muted" hidden></p>
+          <audio id="record-preview" controls hidden></audio>
+        </div>
+        <label class="upload-area">
+          <span>Upload audio file</span>
+          <small>MP3, WAV, M4A up to 25MB</small>
+          <input id="audio-input" name="audio" type="file" accept="audio/*">
+        </label>
+      </div>
+      <p class="audio-note">Audio is stored locally under <code>exports/voice-feedback/</code> and is never committed to git.</p>
+    </section>
+
+    <label>Notes / Transcript (Optional)
+      <textarea name="notes" placeholder="Add any written context, links, or a manual transcript..."></textarea>
+    </label>
+    <label class="clarify-box"><input type="checkbox" name="ambiguous" value="true"> Needs clarification <span>Flags this intake issue so it stays in Needs clarification until a human resolves ambiguity.</span></label>
+    <div class="submit-row"><button class="primary-action" type="submit">Create Needs processing issue</button></div>
+  </form>
+
+  <section class="surface-card">
+    <div class="surface-card-header"><h2>Intake queue {{ info_tip("Raw intake, Needs clarification, and Ready for Codex issues appear here until processed.") }}</h2></div>
+    <div class="surface-card-body intake-queue">
+      {% for issue in intakes %}
+      {% set state = workflow_states.get(issue.id, "ready-for-codex") %}
+      <a class="intake-item" href="/issues/{{ issue.id }}">
+        <span class="issue-id">#{{ display_id(issue.sequence) }}</span>
+        <strong>{{ issue.title }}</strong>
+        <span class="badge state-{{ state }}">{{ workflow_labels.get(state, state|replace('-', ' ')) }}</span>
+        <span class="muted">{{ issue.summary or "" }}</span>
+      </a>
+      {% else %}
+      <p class="muted">No intake issues yet.</p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+<script>
+  const startButton = document.getElementById("record-start");
+  const stopButton = document.getElementById("record-stop");
+  const continueButton = document.getElementById("record-continue");
+  const startOverButton = document.getElementById("record-start-over");
+  const deleteButton = document.getElementById("record-delete");
+  const statusText = document.getElementById("record-status");
+  const savedText = document.getElementById("record-saved");
+  const preview = document.getElementById("record-preview");
+  const audioInput = document.getElementById("audio-input");
+  const priorityInput = document.querySelector('select[name="priority"]');
+  let recorder;
+  let activeStream;
+  let requestToken = 0;
+  let chunks = [];
+  let savedIssueId;
+  let continuingRecording = false;
+
+  const setStatus = (message, state = "idle") => {
+    statusText.textContent = message;
+    statusText.dataset.state = state;
+  };
+
+  const setSavedIssue = (payload) => {
+    savedIssueId = payload.issue_id;
+    savedText.hidden = false;
+    savedText.innerHTML = `Saved automatically as <a href="${payload.url}">#${payload.issue_sequence}</a>: ${payload.title}.`;
+    deleteButton.disabled = false;
+    startOverButton.disabled = false;
+    continueButton.disabled = false;
+  };
+
+  const clearSavedIssue = () => {
+    savedIssueId = undefined;
+    savedText.hidden = true;
+    savedText.textContent = "";
+    deleteButton.disabled = true;
+    startOverButton.disabled = chunks.length === 0;
+    continueButton.disabled = chunks.length === 0;
+  };
+
+  const deleteSavedIssue = async () => {
+    if (!savedIssueId) return true;
+    const response = await fetch(`/issues/${savedIssueId}/voice-intake/delete`, { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) {
+      setStatus(payload.error || "Could not delete saved recording.", "error");
+      return false;
+    }
+    clearSavedIssue();
+    return true;
+  };
+
+  const resetRecording = async () => {
+    const deleted = await deleteSavedIssue();
+    if (!deleted) return;
+    chunks = [];
+    audioInput.value = "";
+    preview.hidden = true;
+    preview.removeAttribute("src");
+    startOverButton.disabled = true;
+    continueButton.disabled = true;
+    setStatus("Recording discarded.", "idle");
+  };
+
+  const stopTracks = () => {
+    if (activeStream) {
+      activeStream.getTracks().forEach((track) => track.stop());
+      activeStream = undefined;
+    }
+  };
+
+  if (!window.isSecureContext) {
+    startButton.disabled = true;
+    setStatus("Browser recording requires localhost or HTTPS. Open this app from http://localhost:8000 or upload an audio file instead.", "error");
+  } else if (!navigator.mediaDevices || !window.MediaRecorder) {
+    startButton.disabled = true;
+    setStatus("Browser recording is unavailable here. Upload an audio file instead.", "error");
+  } else {
+    startButton.addEventListener("click", async () => {
+      const token = requestToken + 1;
+      requestToken = token;
+      startButton.disabled = true;
+      stopButton.disabled = true;
+      continueButton.disabled = true;
+      preview.hidden = true;
+      if (!continuingRecording) chunks = [];
+      if (!savedIssueId || !continuingRecording) audioInput.value = "";
+      continuingRecording = false;
+      setStatus("Requesting microphone access...", "requesting");
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (token !== requestToken) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        activeStream = stream;
+        recorder = new MediaRecorder(stream);
+        recorder.addEventListener("dataavailable", (event) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        });
+        recorder.addEventListener("stop", async () => {
+          const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+          const file = new File([blob], `voice-feedback-${Date.now()}.webm`, { type: blob.type });
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          audioInput.files = transfer.files;
+          preview.src = URL.createObjectURL(blob);
+          preview.hidden = false;
+          stopTracks();
+          stopButton.disabled = true;
+          setStatus("Saving recording...", "saving");
+          try {
+            const formData = new FormData();
+            formData.append("audio", file);
+            formData.append("autosave", "true");
+            formData.append("title", "");
+            formData.append("notes", "");
+            formData.append("priority", priorityInput ? priorityInput.value : "");
+            if (savedIssueId) formData.append("replace_issue_id", savedIssueId);
+            const response = await fetch("{{ request.url.path }}".replace("/intake", "/voice-feedback"), {
+              method: "POST",
+              body: formData,
+            });
+            const payload = await response.json();
+            if (!response.ok || !payload.ok) {
+              throw new Error(payload.error || "Autosave failed");
+            }
+            setSavedIssue(payload);
+            setStatus("Recording saved automatically.", "attached");
+          } catch (error) {
+            setStatus(`Recording attached but autosave failed: ${error.message}. Submit the intake form to save it.`, "error");
+          } finally {
+            startButton.disabled = false;
+            startOverButton.disabled = false;
+            continueButton.disabled = false;
+          }
+        });
+        recorder.start();
+        stopButton.disabled = false;
+        startOverButton.disabled = true;
+        setStatus("Recording...", "recording");
+      } catch (error) {
+        stopTracks();
+        startButton.disabled = false;
+        stopButton.disabled = true;
+        continueButton.disabled = chunks.length === 0;
+        const reason = error.name || error.message || "permission denied";
+        setStatus(`Microphone recording failed: ${reason}. Upload an audio file instead.`, "error");
+      }
+    });
+
+    stopButton.addEventListener("click", () => {
+      if (recorder && recorder.state === "recording") {
+        setStatus("Attaching recording...", "attaching");
+        recorder.stop();
+      }
+    });
+
+    continueButton.addEventListener("click", () => {
+      continuingRecording = true;
+      setStatus("Continuing recording. The next stop replaces the current autosaved intake.", "recording");
+      startButton.click();
+    });
+
+    startOverButton.addEventListener("click", resetRecording);
+
+    deleteButton.addEventListener("click", resetRecording);
+  }
+</script>
+{% endblock %}

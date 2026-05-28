@@ -1,5 +1,7 @@
 # MVP Scope Lock
 
+This document records the original MVP boundary. Later dogfood sprints have added post-MVP capabilities such as backlog ordering, release planning, voice intake, and Guidance Sync; keep those documented in the product guide and sprint closeout notes instead of retroactively widening this MVP lock.
+
 ## In Scope
 
 - Single-user FastAPI/Jinja web app.

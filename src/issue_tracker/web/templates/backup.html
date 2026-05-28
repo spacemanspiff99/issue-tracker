@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "_components.html" import info_tip %}
+{% block body %}
+<div class="page-surface">
+<h1>{{ project.name }} backup and restore {{ info_tip("Backups separate sanitized Git-safe recovery bundles from raw artifacts like audio, screenshots, and database dumps.") }}</h1>
+<div class="panel">
+  <h2>Portable recovery bundle</h2>
+  <p>Create a sanitized bundle with tracker records, guidance sync state, audit summaries, checksums, app version, source commit, and migration revision. Raw audio, screenshots, certificates, `.env`, database dumps, sessions, password hashes, and secrets are excluded.</p>
+  <pre>docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker export-recovery-bundle {{ project.id }} exports/recovery-bundles/{{ project.name|lower|replace(" ", "-") }}/latest
+docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker restore-recovery-bundle exports/recovery-bundles/{{ project.name|lower|replace(" ", "-") }}/latest --dry-run</pre>
+  <h2>Health</h2>
+  <p>Status: <strong>{{ backup_health.status }}</strong></p>
+  <p>Bundle: <code>{{ backup_health.bundle }}</code></p>
+  <p>{{ backup_health.next }}</p>
+  <h2>Vibecoding target</h2>
+  <p>Latest: <code>{{ vibecoding_plan.latest }}</code></p>
+  <p>Snapshot: <code>{{ vibecoding_plan.snapshot }}</code></p>
+  <p class="muted">Only sanitized recovery bundle files and provenance manifests belong in this Git target. Raw artifacts require encrypted external storage.</p>
+  <h2>Encrypted artifacts</h2>
+  <p>Use restic, borg, or rclone for database dumps, raw audio, screenshots, and generated exports. Missing tools or credentials should remain blocked owner actions, not successful backups.</p>
+  {% if backup_health.errors %}
+  <ul>
+    {% for error in backup_health.errors %}
+    <li>{{ error }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <h2>Legacy JSON export</h2>
+  <p>Use the existing JSON export/import commands for compatibility or small local transfer.</p>
+  <pre>docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker export-json {{ project.id }} exports/{{ project.name|lower|replace(" ", "-") }}.json
+docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker import-json exports/{{ project.name|lower|replace(" ", "-") }}.json Restored-{{ project.name|replace(" ", "-") }} --category-map IT-1=IT-1</pre>
+  <p class="muted">Durable guide: documentation/guides/backup-restore.md</p>
+</div>
+</div>
+{% endblock %}

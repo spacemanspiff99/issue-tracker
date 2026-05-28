@@ -226,6 +226,22 @@ git diff --check
 LC_ALL=C grep -RIn '[^ -~]' README.md AGENTS.md .cursor/rules .github/workflows documentation src tests migrations deployment .env.example pyproject.toml alembic.ini
 ```
 
+### Evidence 2026-05-15
+
+Branch: `main`
+Base commit: `198a534`
+
+| Check | Result | Evidence |
+|---|---|---|
+| Docker access | Pass | `id` showed user `akun` in groups `akun,nogroup`; `/var/run/docker.sock` was `nobody:nogroup` with group read/write. |
+| Compose config | Pass | `docker compose -f deployment/docker-compose.local.yml config` rendered valid services, network, and volume configuration. |
+| Build | Pass | `docker compose -f deployment/docker-compose.local.yml build` completed after adding the missing `itsdangerous` runtime dependency. |
+| Migration | Pass | `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head` completed against local PostgreSQL. |
+| Tests | Pass | `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/` reported `15 passed`; pytest emitted a non-blocking cache permission warning for `/app/.pytest_cache`. |
+| MCP smoke | Pass | `docker compose -f deployment/docker-compose.local.yml run --rm app python -m issue_tracker.mcp.server --smoke` returned `{"ok": true}` with the expected tool list. |
+| Health | Pass | `curl -fsS http://localhost:8000/health` returned `{"ok":true,"database":"ok"}` with the Compose stack running. |
+| Diff whitespace | Pass | `git diff --check` produced no output. |
+
 ## STOP
 
 Stop only after the coordinator records one of these outcomes:
