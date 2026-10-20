@@ -50,16 +50,22 @@ The local runner pipeline creates a compressed custom-format `pg_dump` before mi
 
 Restore is intentionally manual. Inspect the target and use PostgreSQL tools such as `pg_restore` from a known-good backup; do not add automatic restore or rollback that could overwrite live data without human approval.
 
-## Local Runner Dev -> UAT -> Dev Pipeline
+## Local Runner Dev -> UAT -> Production Pipeline
 
 Use `.github/workflows/local-pipeline.yml` for the local network pipeline:
 
 1. Verify the current self-hosted runner checkout with Docker build, Alembic, tests, MCP smoke, and ruff.
 2. Deploy the verified source tree to UAT at `akun@192.168.10.18`.
 3. Run UAT health, MCP smoke, and browser UAT on the UAT host.
-4. Optionally promote the same revision to downstream dev at `akun@192.168.10.8`.
+4. Optionally deploy the same SHA to **PRODUCTION** at `akun@192.168.10.8` (home-lab production; holds the real tracker data).
 
-The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker` and `local-dev`. The runner acts as an orchestrator and SSHes into the current dev host, UAT host, and downstream dev host; Docker does not need to be installed inside the runner LXC.
+Hosts: dev `192.168.10.20`, UAT `192.168.10.18`, **production `192.168.10.8`**.
+
+The `Deploy Production` job (`deploy-prod`, `environment: prod`) runs only when `promote_prod` is `true` and `Deploy UAT` succeeded in the same run. It refuses to deploy if its checkout SHA differs from the SHA UAT deployed. It always takes a `pg_dump` before `alembic upgrade head`: the deploy script refuses `SKIP_DB_BACKUP=1` when `DEPLOY_ENV` is `uat` or `prod`. Every deploy fails unless `/health` returns `"database": "ok"`.
+
+Owner action: in GitHub **Settings -> Environments**, create `prod` with a required reviewer so every production deploy waits for explicit approval.
+
+The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker` and `local-dev`. The runner acts as an orchestrator and SSHes into the current dev host, UAT host, and production host; Docker does not need to be installed inside the runner LXC.
 
 Runner-local SSH prerequisites:
 
@@ -89,14 +95,14 @@ Pre-migration database dumps are written on the target host under:
 Run it from GitHub Actions with:
 
 - `uat_host`: `192.168.10.18`
-- `dev_host`: `192.168.10.8`
+- `prod_host`: `192.168.10.8` (production)
 - `deploy_user`: `akun`
 - `deploy_path`: `/home/akun/issue-tracker`
-- `promote_dev`: `false` for UAT-only, `true` to promote after UAT passes
+- `promote_prod`: `false` for UAT-only, `true` to deploy to production after UAT passes (still waits for the `prod` environment reviewer)
 
 The remote app URLs are:
 
 ```text
-http://192.168.10.18:8000
-http://192.168.10.8:8000
+http://192.168.10.18:8000   # UAT
+http://192.168.10.8:8000    # production
 ```
