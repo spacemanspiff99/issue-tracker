@@ -1,0 +1,34 @@
+name: Image
+
+# Builds deployment/Dockerfile and pushes ghcr.io/spacemanspiff99/issue-tracker:<sha>.
+# Called by k3s-pipeline.yml so every deployed SHA has an image.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/spacemanspiff99/issue-tracker:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build
+        run: |
+          docker build -f deployment/Dockerfile \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            -t "$IMAGE" .
+      - name: Push
+        run: docker push "$IMAGE"

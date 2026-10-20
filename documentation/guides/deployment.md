@@ -1,5 +1,11 @@
 # Deployment Guide
 
+**UAT and production run on the home-lab k3s cluster: see [`k3s.md`](k3s.md)** (namespaces
+`issue-tracker-uat` and `issue-tracker`, pipeline `.github/workflows/k3s-pipeline.yml`, issue 0020).
+Docker Compose below is for local development only, plus the legacy Compose hosts until the owner
+completes the k3s cutover in `k3s.md` (step 11); after that, do not use `local-pipeline.yml` for
+UAT or production.
+
 Use `deployment/docker-compose.app.yml` when PostgreSQL is external. Provide environment variables through your deployment system or an uncommitted `.env` file.
 
 Required variables:
@@ -50,7 +56,7 @@ The local runner pipeline creates a compressed custom-format `pg_dump` before mi
 
 Restore is intentionally manual. Inspect the target and use PostgreSQL tools such as `pg_restore` from a known-good backup; do not add automatic restore or rollback that could overwrite live data without human approval.
 
-## Local Runner Dev -> UAT -> Production Pipeline
+## Legacy: Local Runner Dev -> UAT -> Production Compose Pipeline (until k3s cutover)
 
 Use `.github/workflows/local-pipeline.yml` for the local network pipeline:
 

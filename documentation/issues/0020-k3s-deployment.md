@@ -1,6 +1,6 @@
 # Issue 0020: Deploy UAT And Production To The Home-Lab k3s Cluster
 
-Status: backlog
+Status: in progress (PR open; CI proof on kind)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`, `IT-3`, `IT-5`
 Sprint: Sprint 0007
