@@ -10,8 +10,8 @@ Until the app dogfoods itself, this repo's own tracker is markdown in `documenta
 ## IDs and files
 
 - Issues and sprints share one `NNNN` sequence. Next ID = highest number across
-  `documentation/issues/` and `documentation/sprints/` + 1 (check with Glob; 0012 was highest on
-  2026-10-20). Files: `NNNN-kebab-title.md`.
+  `documentation/issues/` and `documentation/sprints/` + 1 (Glob both folders;
+  never trust a remembered number). Files: `NNNN-kebab-title.md`.
 - Header lines: `# Issue NNNN: Title`, `Status: backlog|in-progress|done`, `Recommended model:`
   (Claude sessions: e.g. `claude-opus-5-5 medium`), `Category gates:` (`IT-n` list), `Sprint: Sprint NNNN`.
 
@@ -21,6 +21,8 @@ Context (2–4 lines) · Files in scope · Acceptance criteria as `- [ ]` pass/f
 Category gates (paste the matching `IT-n` checklist line verbatim from `ISSUE_LOG.md`) ·
 Verification commands · `## STOP` (when to stop, or the exact blocker + next step).
 Copy an existing issue in `documentation/issues/` as the template rather than inventing one.
+UI issues: AC must be Playwright workflows with step-level expected results and test names
+(`ui-playwright` §1) — an issue without them isn't ready to start.
 
 ## Closing
 

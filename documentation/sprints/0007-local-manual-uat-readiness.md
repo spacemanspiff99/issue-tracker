@@ -16,6 +16,9 @@ Make the Issue Tracker MVP ready for local manual UAT by proving the local runti
 | Issue 0010 | Demo Data And Reset-Safe UAT Commands | GPT-5.5 high | UAT data setup and reset are deterministic, local-only, and secret-safe. |
 | Issue 0011 | MCP Local UAT Smoke | GPT-5.5 high | MCP smoke and compact-output checks pass. |
 | Issue 0012 | UAT Findings And Release Decision | GPT-5.5 high | UAT status and follow-up triage are evidence-backed. |
+| Issue 0013 | Reconcile Schema Drift Before Production Data | claude-opus-5-5 high | Migrations and models agree; drift check is 0 in CI. |
+| Issue 0014 | Playwright Workflow Suite With Step Screenshots | claude-opus-5-5 medium | Every UI workflow is driven by Playwright with a screenshot per step. |
+| Issue 0015 | Label 192.168.10.8 As Production In The Pipeline | claude-opus-5-5 high | Production deploys are named, gated, and backed up as production. |
 
 ## Sequential Role Review
 

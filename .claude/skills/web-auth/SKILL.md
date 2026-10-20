@@ -22,9 +22,5 @@ user mistakes). Templates extend `base.html`; use the `display_id` global for `N
 
 1. Route tests in `tests/integration/test_web_routes.py` (TestClient): auth redirect, happy path,
    validation error path.
-2. Visible change → browser check. Clean logs or a 200 are not proof the page is usable.
-   Local: `docker compose -f deployment/docker-compose.local.yml up` then open
-   `http://localhost:8000`. Cloud container: run uvicorn against a migrated Postgres
-   (`schema-change` has the setup) and drive it with Playwright using
-   `executablePath: '/opt/pw-browsers/chromium'`; capture one screenshot per changed page and say
-   what it shows.
+2. Anything visible or clickable → the Playwright Workflow Gate (`ui-playwright`): workflow AC,
+   `tests/e2e/` run of the full catalog, screenshot at every step. Route tests don't replace it.

@@ -77,3 +77,6 @@ Thumbs.db
 
 # Claude Code per-user settings
 .claude/settings.local.json
+
+# Playwright screenshots and traces
+artifacts/

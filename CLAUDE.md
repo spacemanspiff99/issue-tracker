@@ -64,9 +64,13 @@ containers, never as a documented user-facing path.
   `mcp-contract`
 - **Secrets.** No `.env`, credentials, dumps, backups, or exports in git. Passwords Argon2-hashed;
   session cookie HTTP-only + SameSite=Lax. → `web-auth`
-- **Deploys need explicit user approval** (`local-pipeline.yml` targets real LAN hosts). Backup
+- **Deploys need explicit user approval.** `192.168.10.8` is home-lab **production** (the
+  pipeline mislabels it `dev_host`); `.18` UAT, `.20` dev. Backup
   before migrate; never downgrade/drop/reset in a release. `/health` must show DB connectivity.
   → `deploy-safety`
+- **UI = Playwright workflows.** Any visible change: AC written as workflows, Playwright drives
+  the full workflow catalog in `tests/e2e/`, screenshot at every step, assertions per step. →
+  `ui-playwright`
 - **Truth.** Never say "done" or "ready for UAT" without the gate's commands actually passing on
   this commit. A green unit run is not a migration check or a browser check. → `uat-gate`
 - **Two failures, same cause → stop** and gather new evidence before retrying.
@@ -78,7 +82,8 @@ containers, never as a documented user-facing path.
 | Changing `domain/models.py`, adding/editing a migration, DB constraints | `schema-change` |
 | Changing services, repositories, sequence IDs, status, dependencies, close metadata, categories | `tracker-invariants` |
 | Adding/changing an MCP tool, its args, or its output shape | `mcp-contract` |
-| Changing routes, templates, setup/login, sessions, or any UI | `web-auth` |
+| Changing routes, templates, setup/login, sessions | `web-auth` |
+| Any visible UI change, writing UI acceptance criteria, or claiming a UI works | `ui-playwright` |
 | Touching `deployment/`, compose, Dockerfile, workflows, env vars, backups, or running a deploy | `deploy-safety` |
 | Writing/closing an issue, sprint, or prompt in `documentation/`, or updating `ISSUE_LOG.md` | `tracker-docs` |
 | About to claim "ready for UAT"/release-ready, or running sprint 0007/0008 work | `uat-gate` |

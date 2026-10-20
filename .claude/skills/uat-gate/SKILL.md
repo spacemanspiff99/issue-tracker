@@ -15,9 +15,8 @@ Issues: 0008 runtime gate → 0009 web UAT script → 0010 demo data/reset → 0
 2. Explicit migration on a fresh volume: `... run --rm app alembic upgrade head`
 3. `... run --rm app python -m ruff check .` and `... run --rm app python -m pytest tests/`
 4. `... up -d`, then `curl -fsS http://localhost:8000/health` → `"database": "ok"`
-5. Browser path (Playwright or human): `/setup` → login → create project → category → two issues
-   with AC → dependency (cycle rejected) → sprint + add issue → close issue with originating LLM →
-   closed metadata immutable. One screenshot per step.
+5. `RUN_BROWSER_UAT=1 ... pytest tests/e2e/`: full `ui-playwright` workflow catalog, desktop and
+   mobile, screenshot per step, all green. A human click-through supplements this, never replaces it.
 6. MCP: `... run --rm app python -m issue_tracker.mcp.server --smoke` (names only) plus
    `tests/integration/test_mcp_tools.py` (behavior).
 7. Notes from `documentation/uat/TEMPLATE-local-uat.md` saved under `documentation/uat/` and

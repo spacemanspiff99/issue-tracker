@@ -12,4 +12,5 @@ paths:
 - Every page except `/health`, `/setup` (only while no user exists) and `/login` requires a session.
 - Passwords hashed in `web/security.py` (Argon2); never log credentials or form bodies.
 - Session cookie HTTP-only, SameSite=Lax, `Secure` from `SESSION_COOKIE_SECURE`.
-- Procedure and verification: `web-auth` skill.
+- Any visible change: AC as Playwright workflows, full `tests/e2e/` catalog run, screenshot per
+  step (`ui-playwright`). Procedure: `web-auth`.
