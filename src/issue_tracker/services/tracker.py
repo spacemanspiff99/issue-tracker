@@ -216,15 +216,14 @@ class IssueService:
         issue = self.repo.get_issue(issue_id)
         new_status = IssueStatus(status)
         if issue.status == IssueStatus.DONE and issue.closed_at is not None:
-            if new_status != IssueStatus.DONE:
-                raise DomainError("Closed issue metadata is immutable")
-            return issue
+            raise DomainError("Closed issue metadata is immutable")
         if new_status == IssueStatus.DONE:
+            originating_llm = (originating_llm or "").strip()
             if not originating_llm:
                 raise DomainError("Originating LLM is required to close an issue")
             issue.originating_llm = originating_llm
-            issue.closed_by = closed_by or actor
-            issue.close_note = close_note or None
+            issue.closed_by = (closed_by or "").strip() or actor
+            issue.close_note = (close_note or "").strip() or None
             issue.closed_at = datetime.now(UTC)
         issue.status = new_status
         record_event(self.session, issue.id, "status", f"Status changed to {new_status.value}", actor)

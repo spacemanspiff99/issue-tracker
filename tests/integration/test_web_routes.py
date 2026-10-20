@@ -78,3 +78,96 @@ def test_web_mvp_project_issue_dependency_sprint_close_flow(engine):
     project_page = client.get(project_path)
     assert "done" in project_page.text
     assert "Issue log" in project_page.text
+
+
+def _project_with_issues(client, maker, name="Tracker", titles=("Blocker", "Blocked")):
+    project = client.post("/projects", data={"name": name, "repo_url": ""}, follow_redirects=False)
+    project_path = project.headers["location"]
+    for title in titles:
+        client.post(f"{project_path}/issues", data={"title": title, "acceptance_criteria": f"- [ ] {title}"})
+    project_id = int(project_path.rsplit("/", 1)[1])
+    with maker() as session:
+        issues = session.query(Issue).filter_by(project_id=project_id).order_by(Issue.sequence).all()
+    return project_path, issues
+
+
+def test_project_and_category_domain_errors_render_inline(engine):
+    client, _ = make_client(engine)
+    client.post("/setup", data={"username": "admin", "password": "secret"})
+
+    blank_project = client.post("/projects", data={"name": "   ", "repo_url": ""})
+    assert blank_project.status_code == 400
+    assert "Project name is required" in blank_project.text
+
+    project_path = client.post("/projects", data={"name": "Tracker"}, follow_redirects=False).headers["location"]
+    blank_category = client.post(
+        f"{project_path}/categories", data={"key": "BUG", "name": "Bug", "checklist": "   "}
+    )
+    assert blank_category.status_code == 400
+    assert "Category key, name, and checklist are required" in blank_category.text
+
+    blank_sprint = client.post(f"{project_path}/sprints", data={"goal": "   "})
+    assert blank_sprint.status_code == 400
+    assert "Sprint goal is required" in blank_sprint.text
+
+
+def test_dependency_domain_errors_render_inline_on_issue_page(engine):
+    client, maker = make_client(engine)
+    client.post("/setup", data={"username": "admin", "password": "secret"})
+    _, (blocker, blocked) = _project_with_issues(client, maker)
+    client.post(f"/issues/{blocked.id}/dependencies", data={"blocker_issue_id": blocker.id})
+
+    cycle = client.post(f"/issues/{blocker.id}/dependencies", data={"blocker_issue_id": blocked.id})
+    assert cycle.status_code == 400
+    assert "Dependency would create a cycle" in cycle.text
+    assert f"{blocked.id} blocks {blocker.id}" not in cycle.text
+
+    duplicate = client.post(f"/issues/{blocked.id}/dependencies", data={"blocker_issue_id": blocker.id})
+    assert duplicate.status_code == 400
+    assert "Dependency already exists" in duplicate.text
+
+    self_edge = client.post(f"/issues/{blocked.id}/dependencies", data={"blocker_issue_id": blocked.id})
+    assert self_edge.status_code == 400
+    assert "An issue cannot block itself" in self_edge.text
+
+
+def test_close_domain_errors_render_inline_and_metadata_is_shown(engine):
+    client, maker = make_client(engine)
+    client.post("/setup", data={"username": "admin", "password": "secret"})
+    _, (issue,) = _project_with_issues(client, maker, titles=("Closable",))
+
+    blank = client.post(f"/issues/{issue.id}/close", data={"originating_llm": "   ", "close_note": ""})
+    assert blank.status_code == 400
+    assert "Originating LLM is required to close an issue" in blank.text
+    assert "Status: backlog" in blank.text
+
+    closed = client.post(
+        f"/issues/{issue.id}/close",
+        data={"originating_llm": "gpt-5.5", "close_note": "first"},
+        follow_redirects=False,
+    )
+    assert closed.status_code == 303
+    detail = client.get(f"/issues/{issue.id}")
+    assert "<dd>gpt-5.5</dd>" in detail.text
+    assert "<dd>admin</dd>" in detail.text
+    assert "<dd>first</dd>" in detail.text
+
+    reclose = client.post(f"/issues/{issue.id}/close", data={"originating_llm": "other-llm", "close_note": "x"})
+    assert reclose.status_code == 400
+    assert "Closed issue metadata is immutable" in reclose.text
+    assert "<dd>gpt-5.5</dd>" in reclose.text
+    assert "other-llm" not in reclose.text
+
+
+def test_sprint_issue_domain_error_renders_inline(engine):
+    client, maker = make_client(engine)
+    client.post("/setup", data={"username": "admin", "password": "secret"})
+    project_path, _ = _project_with_issues(client, maker, name="One", titles=("Mine",))
+    _, (foreign,) = _project_with_issues(client, maker, name="Two", titles=("Foreign",))
+    sprint_path = client.post(f"{project_path}/sprints", data={"goal": "MVP"}, follow_redirects=False).headers[
+        "location"
+    ]
+
+    cross = client.post(f"{sprint_path}/issues", data={"issue_id": foreign.id})
+    assert cross.status_code == 400
+    assert "Sprint and issue belong to different projects" in cross.text
