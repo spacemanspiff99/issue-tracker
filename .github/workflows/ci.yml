@@ -64,3 +64,42 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build image
         run: docker build -f deployment/Dockerfile .
+
+  e2e:
+    # Same path as remote-compose-deploy.sh RUN_BROWSER_UAT=1: compose stack, explicit migrate,
+    # then the Playwright workflow suite inside the app container.
+    runs-on: ubuntu-latest
+    env:
+      COMPOSE: docker compose -f deployment/docker-compose.local.yml
+      ADMIN_INITIAL_PASSWORD: ci-e2e-password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start compose stack
+        run: $COMPOSE up -d --build postgres app
+      - name: Migrate
+        run: $COMPOSE exec -T app alembic upgrade head
+      - name: Wait for health
+        run: |
+          for attempt in $(seq 1 30); do
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          exit 1
+      - name: Browser UAT suite
+        run: $COMPOSE exec -T -e RUN_BROWSER_UAT=1 app python -m pytest -p no:cacheprovider -rfEX tests/e2e/
+      - name: Collect screenshots
+        if: always()
+        run: |
+          mkdir -p artifacts
+          $COMPOSE cp app:/app/artifacts/e2e artifacts/e2e || true
+          find artifacts/e2e -name '*.png' | wc -l
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: artifacts/e2e/
+          if-no-files-found: warn
+      - name: App logs
+        if: failure()
+        run: $COMPOSE logs app
