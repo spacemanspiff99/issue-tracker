@@ -18,8 +18,8 @@ Release decision stays with [0012](../issues/0012-uat-findings-and-release-decis
   `playwright install --with-deps chromium` layer cannot run here. The image was built from the
   same context with that one line removed (scratch copy, not committed) via
   `docker build --network host -f <scratch>/Dockerfile.nodeps -t deployment-app .`, on a
-  local-only `python:3.12-slim` tag that adds the session proxy CA. **`docker compose ... build`
-  as written was not proven here** — owner runs it on the LAN.
+  local-only `python:3.12-slim` tag that adds the session proxy CA. `docker compose ... build` as written was not proven here; CI's `e2e` job proved it on a
+  clean runner ([run](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39466799278/job/118780179039)).
 - Because of that, the e2e suite ran from the host Chromium against the compose app on
   `localhost:8000`, not inside the app container.
 
@@ -28,7 +28,7 @@ Release decision stays with [0012](../issues/0012-uat-findings-and-release-decis
 | Check | Command or step | Pass/Fail | Evidence | Blocker or notes |
 |---|---|---|---|---|
 | Compose config | `docker compose -f deployment/docker-compose.local.yml config -q` | Pass | exit 0 | |
-| Build | `docker compose -f deployment/docker-compose.local.yml build` | Blocked here | `failed to resolve ... python:3.12-slim: 429` then apt `403 Forbidden` for `deb.debian.org` | Environment network policy; app layers (pip install `-e .[dev]`) built fine. Owner: run on LAN. |
+| Build | `docker compose -f deployment/docker-compose.local.yml build` | Pass (CI) / blocked here | CI `e2e` `up -d --build` on `c10970f`: [run](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39466799278/job/118780179039). Here: `failed to resolve ... python:3.12-slim: 429` then apt `403 Forbidden` for `deb.debian.org` | Environment network policy; app layers (pip install `-e .[dev]`) built fine. |
 | Migration | `... run --rm app alembic upgrade head` (fresh volume) | Pass | `0001_initial → 0002 → 0003 → 0004_reconcile_schema_drift` | |
 | Lint | `... run --rm app python -m ruff check .` | Fail (tooling) | `.ruff_cache` not writable by `appuser` | [0027](../issues/0027-ruff-in-app-container-cache-permission.md); `--no-cache`: `All checks passed!` |
 | Tests | `... run --rm app python -m pytest tests/` | Pass | `22 passed, 22 skipped` (skips = e2e without `RUN_BROWSER_UAT`) | |
@@ -95,6 +95,6 @@ Release decision stays with [0012](../issues/0012-uat-findings-and-release-decis
 
 Local manual UAT **not ready** as of `a98b164` — BLOCKED: MCP stdio server — fails to start on a
 fresh build ([0025](../issues/0025-mcp-2x-breaks-stdio-server.md)) — fix 0025, then re-run the
-stdio script. Also owed before "ready": `docker compose ... build` as written on the LAN, and a
+stdio script. Also owed before "ready": a
 human click-through of `documentation/guides/manual-uat.md`. Web runtime, migrations, unit/integration
 tests, `/health`, and the full Playwright catalog passed on this SHA.

@@ -1,6 +1,6 @@
 # Issue 0008: Local Runtime Gate For Manual UAT
 
-Status: in-progress
+Status: done
 Recommended model: GPT-5.5 high
 Category gates: `IT-3`, `IT-6`
 Sprint: Sprint 0007
@@ -20,7 +20,7 @@ Manual UAT cannot start until the local Docker runtime proves it can build the a
 
 ## Acceptance Criteria
 
-- [ ] `docker compose -f deployment/docker-compose.local.yml build` completes without host Python setup. **Owner (LAN):** blocked in the cloud container — network policy denies `deb.debian.org` (apt in the Playwright layer). All other layers built; see notes.
+- [x] `docker compose -f deployment/docker-compose.local.yml build` completes without host Python setup. Proven by CI `e2e` (`$COMPOSE up -d --build postgres app`, clean runner, no host Python) on `c10970f`: [run](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39466799278/job/118780179039). Blocked in the cloud container only (network policy denies `deb.debian.org`).
 - [x] `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head` succeeds against local PostgreSQL.
 - [x] `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/` passes.
 - [x] `docker compose -f deployment/docker-compose.local.yml up` starts app and PostgreSQL.
@@ -32,12 +32,13 @@ Manual UAT cannot start until the local Docker runtime proves it can build the a
 Full table in [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md).
 
 - `config -q` → exit 0.
-- `build` → blocked by environment (Docker Hub 429, then apt `403` for `deb.debian.org`); image built from the same context minus the `playwright install --with-deps` line. Owner re-runs `build` as written on the LAN.
+- `build` → CI `e2e` job built and started the compose stack on `c10970f` ([run](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39466799278/job/118780179039)). In the cloud container it was blocked by environment (Docker Hub 429, then apt `403` for `deb.debian.org`); image built from the same context minus the `playwright install --with-deps` line. Owner re-runs `build` as written on the LAN.
 - `alembic upgrade head` on a fresh volume → `0001_initial … 0004_reconcile_schema_drift`.
 - `pytest tests/` in the app container → `22 passed, 22 skipped` (e2e skipped without `RUN_BROWSER_UAT`).
 - `up -d` → app + postgres running; `/health` → `{"ok":true,"database":"ok"}`.
 - `RUN_BROWSER_UAT=1 pytest tests/e2e` against the stack → `22 passed`, 70 screenshots.
 - `git status` after the run: only intended source/doc files; `exports/` and `artifacts/` gitignored.
+- Originating model: claude-opus-5-5 (effort: low).
 - In-container `ruff check .` fails on cache permissions → [0027](0027-ruff-in-app-container-cache-permission.md) (`--no-cache` passes).
 
 ## Category Checklists
