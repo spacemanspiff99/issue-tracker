@@ -1,226 +1,115 @@
 # Manual UAT Guide
 
-Use this guide after the Docker runtime gate passes in `documentation/issues/0008-local-runtime-gate.md`.
+Repeatable browser + MCP UAT for the MVP. Each step maps to a workflow in the Playwright catalog
+(`tests/e2e/`, `ui-playwright` skill), so a human click-through and the automated run check the
+same path. Record results in a copy of
+[`../uat/TEMPLATE-local-uat.md`](../uat/TEMPLATE-local-uat.md) saved as
+`documentation/uat/YYYY-MM-DD-<env>-uat.md`.
 
-## Preconditions
+The steps are runtime-agnostic: they need a running app on a migrated PostgreSQL and its base URL.
+Local Docker Compose commands are given below. For the k3s UAT cluster, use
+[`k3s.md`](k3s.md) (issue 0020) to deploy, migrate, and get the URL, then start at
+[Browser path](#browser-path).
 
-- The current user can run Docker without `sudo`.
-- Compose config validates.
-- The app image builds from the current checkout.
-- Migrations have been run explicitly.
-- Tests pass through the app service.
-- The local stack is running at `http://localhost:8000`.
+## 1. Prerequisites (local Docker Compose)
 
-Commands:
+Requires Docker with Compose v2; no host Python, virtualenv, PostgreSQL, or Alembic.
 
 ```bash
-docker compose -f deployment/docker-compose.local.yml config
-docker compose -f deployment/docker-compose.local.yml build
+C="docker compose -f deployment/docker-compose.local.yml"
+$C config -q
+$C build
+$C run --rm app alembic upgrade head          # explicit; app startup never migrates
+$C run --rm app python -m pytest tests/
+$C up -d
+curl -fsS http://localhost:8000/health        # expect {"ok":true,"database":"ok"}
+```
+
+Base URL: `http://localhost:8000` (override the host port with `APP_HTTP_PORT`). If `/health`
+does not report `"database":"ok"`, stop and record it as a runtime-gate blocker (issue 0008).
+
+## 2. Data setup
+
+Pick one per run and write it in the notes:
+
+- **Manual entry** — follow the browser path below; the walkthrough creates its own data.
+- **Demo project** — `$C run --rm app issue-tracker seed-demo` (optionally
+  `--project-name "UAT Demo 2"`). Creates one project through the service layer and prints JSON:
+
+  | ID | Kind | State after seeding |
+  |---|---|---|
+  | `0001` | issue "Demo blocker issue" (`DEMO-STATE`) | backlog; blocks `0002` |
+  | `0002` | issue "Demo blocked issue" (`DEMO-STATE`) | in-progress; in sprint `0004` |
+  | `0003` | issue "Demo closed issue" (`DEMO-UI`) | done; originating LLM `demo-seed`; issue-log entry |
+  | `0004` | sprint "Demo UAT sprint" | active |
+  | `0005` | issue "Demo backlog issue" | backlog (created after the sprint) |
+
+  `0004`/`0005` show issues and sprints sharing one project-local `NNNN` sequence. Re-running with
+  the same name prints `"created": false` and changes nothing. The command never deletes,
+  truncates, or migrates, and the demo categories are ordinary project data.
+
+## Browser path
+
+For every page visited, also check styling: the page is visibly styled (not raw HTML), text fits
+controls and tables, forms work with keyboard and mouse, the back link returns to the parent page,
+and no secret values are shown. Check once at desktop width and once at phone width (~390px).
+
+| # | Workflow (test) | Steps | Expected |
+|---|---|---|---|
+| 1 | W-SETUP (`test_00_setup.py::test_setup`) | Fresh DB: open `/` → redirected to `/setup`. Enter username `admin` and a local-only test password. Submit. Open `/setup` again. | Admin created, lands on the project list. `/setup` now redirects away. Password never shown. In devtools → Application → Cookies, the session cookie is `HttpOnly` and `SameSite=Lax` (and `Secure` when served over HTTPS). Do not copy the cookie value into notes. |
+| 2 | W-AUTH (`test_auth_workflows.py::test_auth`) | Log out. Open `/` → redirected to `/login`. Submit a wrong password. Log in with the right one. | Inline "Invalid login" on the wrong password; correct password returns to the project list. |
+| 3 | W-PROJECT (`test_project_workflows.py::test_project`) | Create project `Manual UAT Project` (repo URL optional). | Redirected to project detail; project listed on `/`. |
+| 4 | W-CATEGORY (`test_project_workflows.py::test_category`) | On the project, add category key `UAT-1`, name `UAT state`, a one-line checklist. Open a different project. | Category listed and selectable in the issue form; not shown in the other project. |
+| 5 | W-ISSUE-CREATE failure (`test_issue_workflows.py::test_create_issue`) | Submit issue `Missing AC UAT` with acceptance criteria empty, then with only spaces. | Browser blocks the empty field; whitespace-only submit shows inline "Acceptance criteria are required" on the project page. Issues table has no `Missing AC UAT` row. |
+| 6 | W-ISSUE-CREATE success | Create `Prepare blocker` (category `UAT-1`, AC `- [ ] Blocker can be linked`) and `Complete blocked work` (AC `- [ ] Blocked issue can be closed`). | Each opens with a four-digit ID (`0001`, `0002` in a new project), status backlog, AC shown. |
+| 7 | W-DEPENDENCY (`test_dependency`, `test_dependency_cycle_rejected`) | On `Complete blocked work`, add `Prepare blocker` as blocker. Then on `Prepare blocker`, add `Complete blocked work` as blocker. | Edge shown on both issues. Reverse edge shows "Dependency would create a cycle"; no new edge. |
+| 8 | W-SPRINT (`test_sprint`) | On the project, create sprint `Local manual UAT sprint`. Add `Complete blocked work`. Close the sprint. | Sprint ID continues the issue sequence (e.g. `0003`). Issue listed on the sprint page; its issue status is `in-progress` (the sprint table's own column shows the membership state, `todo`). Sprint status becomes closed. |
+| 9 | W-ISSUE-CLOSE (`test_close_issue`, `test_close_issue_blank_llm_rejected`, `test_closed_issue_metadata_and_reopen_blocked`) | On `Complete blocked work`, close with blank originating LLM. Then close with LLM `uat-llm` and note `Manual UAT close`. Then try to change status again. | Blank LLM → "Originating LLM is required to close an issue", still open. With LLM → `done`, LLM and note shown. Re-open/re-close → "Closed issue metadata is immutable"; metadata unchanged. |
+| 10 | Issue log (no e2e test yet) | Return to the project page. With demo data, open `UAT Demo`. | "Issue log" section visible; empty state reads "No issue log entries yet."; demo project shows its entry. |
+
+Automated equivalent of rows 1–9 (desktop + mobile, screenshot per step under `artifacts/e2e/`):
+
+```bash
+RUN_BROWSER_UAT=1 E2E_BASE_URL=http://localhost:8000 python -m pytest -q tests/e2e
+```
+
+Run it inside the app container (`$C run --rm -e RUN_BROWSER_UAT=1 -e E2E_BASE_URL=http://app:8000 app ...`)
+or from any machine with Playwright Chromium. `W-SETUP` needs a database with no admin yet; on a
+reused database it records that setup is already complete.
+
+## MCP and import/export
+
+MCP steps are in [`mcp.md`](mcp.md#uat-smoke). Import/export:
+
+```bash
+$C run --rm app issue-tracker export-json <project_id> exports/uat-project.json
+$C run --rm app issue-tracker import-json exports/uat-project.json UAT-Restored          # must fail: mapping required
+$C run --rm app issue-tracker import-json exports/uat-project.json UAT-Restored \
+  --category-map DEMO-STATE=DEMO-STATE --category-map DEMO-UI=DEMO-UI
+grep -ciE 'password|secret|session|database_url' exports/uat-project.json            # expect 0
+```
+
+`exports/` is gitignored; never commit an export.
+
+## Local reset (local Docker Compose only)
+
+> **Local development machine only.** This deletes the local Compose volume. It is not a
+> deployment, UAT, or production procedure — never run it against a cluster, a shared database,
+> or any `DATABASE_URL` you did not create on this machine. Cluster data changes go through
+> [`k3s.md`](k3s.md) and [`backup-restore.md`](backup-restore.md).
+
+```bash
+docker compose -f deployment/docker-compose.local.yml down -v     # removes issue_tracker_pgdata
 docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head
-docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/
-docker compose -f deployment/docker-compose.local.yml up
+docker compose -f deployment/docker-compose.local.yml up -d
+docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker seed-demo
 ```
 
-Health check:
+Then start again at W-SETUP. Without a reset, `seed-demo --project-name "<new name>"` gives a fresh
+demo project next to existing data; nothing is ever overwritten.
 
-```bash
-curl -fsS http://localhost:8000/health
-```
+## Recording
 
-Expected result:
-
-```json
-{"ok":true,"database":"ok"}
-```
-
-## Browser Sanity
-
-For every page below, verify:
-
-- The page is visibly styled, not raw unstyled HTML.
-- Text fits within controls and tables.
-- Forms are usable with keyboard and mouse.
-- Navigation links return to the expected parent page.
-- No secret values are shown in the page.
-
-Record results in `documentation/uat/YYYY-MM-DD-local-uat.md`.
-
-## UAT Path
-
-### 1. First-Run Setup
-
-Open `http://localhost:8000/setup`.
-
-Steps:
-
-1. Enter username `admin`.
-2. Enter a local-only test password.
-3. Submit the form.
-
-Expected:
-
-- Admin user is created.
-- Browser redirects to the project list.
-- Session cookie is HTTP-only and SameSite=Lax.
-- Password is not shown or logged.
-
-### 2. Login And Logout
-
-Steps:
-
-1. Use the logout button.
-2. Open `http://localhost:8000/login`.
-3. Log in with the admin credentials.
-
-Expected:
-
-- Invalid credentials show inline validation.
-- Valid credentials return to the project list.
-- Repeated failed attempts eventually show rate limiting.
-
-### 3. Project Creation
-
-Steps:
-
-1. On the project list, create project `Manual UAT Project`.
-2. Leave repo URL blank or use `https://github.com/spacemanspiff99/issue-tracker`.
-
-Expected:
-
-- Browser redirects to the project detail page.
-- Project is listed on the project list page.
-
-### 4. Category Creation
-
-Steps:
-
-1. On the project detail page, create category key `IT-1`.
-2. Use name `Tracker State Integrity`.
-3. Use checklist `Verify sequence allocation, status transitions, dependencies, and close metadata.`
-
-Expected:
-
-- Category appears in the category list.
-- Category is available in the issue creation form.
-- No peer project taxonomy is required.
-
-### 5. Required Acceptance Criteria Validation
-
-Steps:
-
-1. Try to create issue `Missing AC UAT` with an empty acceptance criteria field.
-
-Expected:
-
-- Page shows inline validation: acceptance criteria are required.
-- No new issue row is created.
-- Existing project context remains visible.
-
-### 6. Issue Creation
-
-Steps:
-
-1. Create issue `Prepare blocker`.
-2. Select category `IT-1`.
-3. Use acceptance criteria `- [ ] Blocker issue can be linked`.
-4. Create issue `Complete blocked work`.
-5. Use acceptance criteria `- [ ] Blocked issue can be closed`.
-
-Expected:
-
-- Issues are visible on the project detail page.
-- Display IDs use the shared four-digit sequence convention, such as `0001` and `0002`.
-- Both issues start in backlog.
-
-### 7. Dependency Creation
-
-Steps:
-
-1. Open the `Complete blocked work` issue detail page.
-2. Add `Prepare blocker` as the blocker issue.
-
-Expected:
-
-- Dependency is listed on the issue detail page.
-- Self-dependency and cycle attempts are rejected if tried.
-
-### 8. Sprint Creation And Assignment
-
-Steps:
-
-1. Return to the project detail page.
-2. Create sprint `Local manual UAT sprint`.
-3. On the sprint detail page, add `Complete blocked work`.
-
-Expected:
-
-- Sprint display ID continues the same project-local sequence used by issues.
-- Added issue appears on the sprint page.
-- Added issue status changes to `in-progress`.
-
-### 9. Issue Close
-
-Steps:
-
-1. Open `Complete blocked work`.
-2. Close it with originating LLM `gpt-5.5`.
-3. Add close note `Manual UAT close path verified`.
-
-Expected:
-
-- Issue status changes to `done`.
-- Close metadata is preserved.
-- Attempting to reopen a closed issue is rejected by service tests.
-
-### 10. Issue Log View
-
-Steps:
-
-1. Return to the project detail page.
-2. Review the issue log section.
-
-Expected:
-
-- Issue log section is visible.
-- Empty state is understandable if no recurring issue entries exist yet.
-
-### 11. MCP Smoke
-
-Run:
-
-```bash
-docker compose -f deployment/docker-compose.local.yml run --rm app python -m issue_tracker.mcp.server --smoke
-docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/integration/test_mcp_tools.py
-```
-
-Expected:
-
-- Smoke command returns the expected tool list.
-- MCP compact-output tests pass.
-
-### 12. Import Export Smoke
-
-Run:
-
-```bash
-docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker export-json 1 exports/manual-uat-project.json
-docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker import-json exports/manual-uat-project.json Manual-UAT-Restored --category-map IT-1=IT-1
-```
-
-Expected:
-
-- Export contains no secrets, sessions, password hashes, or environment values.
-- Import requires explicit category mapping and creates a restored project.
-- Generated export remains ignored by git.
-
-## Local Reset
-
-Local reset is destructive and only for the local development database:
-
-```bash
-docker compose -f deployment/docker-compose.local.yml down
-docker volume rm deployment_issue_tracker_pgdata
-docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head
-```
-
-Do not use local reset commands against external or production PostgreSQL.
+Per step: Pass/Fail, evidence (screenshot path, command output line), blocker, and retry step.
+Record any app bug as a new issue under `documentation/issues/` and link it in the notes'
+Findings table; issue 0012 owns the release decision.

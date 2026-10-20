@@ -1,6 +1,6 @@
 # Issue 0010: Demo Data And Reset-Safe UAT Commands
 
-Status: backlog
+Status: done
 Recommended model: GPT-5.5 high
 Category gates: `IT-1`, `IT-2`, `IT-6`
 Sprint: Sprint 0007
@@ -18,11 +18,24 @@ Manual UAT needs deterministic data setup and reset instructions that do not rel
 
 ## Acceptance Criteria
 
-- [ ] UAT data setup path is documented and repeatable.
-- [ ] Any fixture contains no secrets, password hashes, sessions, environment values, logs, dumps, or backups.
-- [ ] Reset instructions are explicitly local-only and cannot be mistaken for deployment guidance.
-- [ ] Import path requires explicit project and category mapping when source categories are present.
-- [ ] Shared `NNNN` issue/sprint sequence behavior is visible in the UAT data.
+- [x] UAT data setup path is documented and repeatable.
+- [x] Any fixture contains no secrets, password hashes, sessions, environment values, logs, dumps, or backups.
+- [x] Reset instructions are explicitly local-only and cannot be mistaken for deployment guidance.
+- [x] Import path requires explicit project and category mapping when source categories are present.
+- [x] Shared `NNNN` issue/sprint sequence behavior is visible in the UAT data.
+
+## Evidence (2026-10-20, `a98b164`)
+
+Decision: seed command, no committed fixture. `issue-tracker seed-demo [--project-name NAME]`
+(`src/issue_tracker/demo_data.py`, one `cli.py` hook) creates one project through the service layer;
+re-running with an existing name is a no-op; it never deletes, truncates, or migrates.
+
+- Seed on compose Postgres → issues `0001`–`0003`, sprint `0004`, issue `0005` (shared sequence), dependency, sprint membership, closed issue with LLM, issue-log entry. Re-run → `{"created": false, ...}`.
+- `tests/integration/test_demo_data.py` → 4 passed (deterministic IDs, no-op rerun, other projects untouched, export has no `password`/`APP_SECRET_KEY`/`session`/`DATABASE_URL`).
+- `export-json` of the demo → `grep -ciE 'password|secret|session|database_url'` = `0`; `exports/` gitignored.
+- `import-json` without `--category-map` → `Import with source categories requires explicit category mapping`, exit 1; with both maps → new project.
+- Reset: [`../guides/manual-uat.md#local-reset-local-docker-compose-only`](../guides/manual-uat.md#local-reset-local-docker-compose-only) — boxed as local-machine-only, points cluster data to `k3s.md`/`backup-restore.md`.
+- Details: [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md). Originating model: claude-opus-5-5 (effort: low).
 
 ## Category Checklists
 

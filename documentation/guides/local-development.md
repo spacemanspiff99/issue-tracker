@@ -28,3 +28,6 @@ Run one-off commands:
 docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker export-json 1 exports/project-1.json
 docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker import-json exports/project-1.json Imported --category-map IT-1=IT-1
 ```
+
+Demo data and manual UAT: `docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker seed-demo`,
+then follow [`manual-uat.md`](manual-uat.md).

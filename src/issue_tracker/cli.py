@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from issue_tracker import demo_data
 from issue_tracker.db import SessionLocal
 from issue_tracker.domain.models import (
     Category,
@@ -120,6 +121,7 @@ def main() -> None:
     import_cmd.add_argument("input", type=Path)
     import_cmd.add_argument("project_name")
     import_cmd.add_argument("--category-map", action="append", default=[])
+    demo_data.add_arguments(sub.add_parser("seed-demo"))
     args = parser.parse_args()
     with SessionLocal() as session:
         if args.command == "export-json":
@@ -127,6 +129,8 @@ def main() -> None:
         elif args.command == "import-json":
             project_id = import_json(session, args.input, args.project_name, parse_mapping(args.category_map))
             print(project_id)
+        elif args.command == "seed-demo":
+            demo_data.run(session, args)
 
 
 if __name__ == "__main__":

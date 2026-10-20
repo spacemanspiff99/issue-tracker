@@ -1,6 +1,6 @@
 # Issue 0008: Local Runtime Gate For Manual UAT
 
-Status: backlog
+Status: in-progress
 Recommended model: GPT-5.5 high
 Category gates: `IT-3`, `IT-6`
 Sprint: Sprint 0007
@@ -20,12 +20,25 @@ Manual UAT cannot start until the local Docker runtime proves it can build the a
 
 ## Acceptance Criteria
 
-- [ ] `docker compose -f deployment/docker-compose.local.yml build` completes without host Python setup.
-- [ ] `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head` succeeds against local PostgreSQL.
-- [ ] `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/` passes.
-- [ ] `docker compose -f deployment/docker-compose.local.yml up` starts app and PostgreSQL.
-- [ ] `GET /health` returns app readiness and database connectivity.
-- [ ] No `.env`, logs, database dumps, backups, generated exports, or local credentials are committed.
+- [ ] `docker compose -f deployment/docker-compose.local.yml build` completes without host Python setup. **Owner (LAN):** blocked in the cloud container — network policy denies `deb.debian.org` (apt in the Playwright layer). All other layers built; see notes.
+- [x] `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head` succeeds against local PostgreSQL.
+- [x] `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/` passes.
+- [x] `docker compose -f deployment/docker-compose.local.yml up` starts app and PostgreSQL.
+- [x] `GET /health` returns app readiness and database connectivity.
+- [x] No `.env`, logs, database dumps, backups, generated exports, or local credentials are committed.
+
+## Evidence (2026-10-20, `a98b164`, cloud container)
+
+Full table in [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md).
+
+- `config -q` → exit 0.
+- `build` → blocked by environment (Docker Hub 429, then apt `403` for `deb.debian.org`); image built from the same context minus the `playwright install --with-deps` line. Owner re-runs `build` as written on the LAN.
+- `alembic upgrade head` on a fresh volume → `0001_initial … 0004_reconcile_schema_drift`.
+- `pytest tests/` in the app container → `22 passed, 22 skipped` (e2e skipped without `RUN_BROWSER_UAT`).
+- `up -d` → app + postgres running; `/health` → `{"ok":true,"database":"ok"}`.
+- `RUN_BROWSER_UAT=1 pytest tests/e2e` against the stack → `22 passed`, 70 screenshots.
+- `git status` after the run: only intended source/doc files; `exports/` and `artifacts/` gitignored.
+- In-container `ruff check .` fails on cache permissions → [0027](0027-ruff-in-app-container-cache-permission.md) (`--no-cache` passes).
 
 ## Category Checklists
 
