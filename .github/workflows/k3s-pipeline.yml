@@ -58,6 +58,13 @@ jobs:
           python3 -c 'import json,sys; sys.exit(0 if json.loads(sys.argv[1]).get("database") == "ok" else 1)' "$body"
       - name: Browser workflow suite
         run: bash deployment/k8s/e2e.sh issue-tracker-uat
+      - name: Upload e2e screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uat-e2e-screenshots-${{ github.sha }}
+          path: artifacts/e2e-k8s/
+          if-no-files-found: warn
       - name: Record UAT SHA
         id: deployed
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

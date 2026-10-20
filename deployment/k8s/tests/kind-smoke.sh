@@ -131,4 +131,6 @@ kubectl get pvc -n "$ns" -o custom-columns=NAME:.metadata.name,REQUEST:.spec.res
 
 echo "== browser workflow suite"
 "$here/e2e.sh" "$ns"
+shots="$(find "${E2E_OUT:-artifacts/e2e-k8s}" -name '*.png' 2> /dev/null | wc -l)"
+[ "$shots" -gt 0 ] || { echo "e2e produced no screenshots" >&2; exit 1; }
 echo "kind smoke passed"

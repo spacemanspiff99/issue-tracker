@@ -24,7 +24,8 @@ deployment/k8s/
   overlays/*/jobs/      the Jobs for that namespace
   secrets/*.example.yaml  placeholders only; never rendered, never real values
   deploy.sh             the only deploy path (see "What a deploy does")
-  e2e.sh                Playwright workflow suite inside the UAT app pod (skips without tests/e2e)
+  e2e.sh                Playwright workflow suite in a one-off pod against the UAT Service;
+                        screenshots to artifacts/e2e-k8s (uploaded by the pipeline); refuses prod
   tests/kind-smoke.sh   disposable kind cluster proof, run by the CI `k8s` job
 ```
 
@@ -126,6 +127,8 @@ kubectl -n issue-tracker-uat create secret generic issue-tracker-db \
 kubectl -n issue-tracker-uat create secret generic issue-tracker-app \
   --from-literal=APP_SECRET_KEY="$(openssl rand -hex 32)" \
   --from-literal=ADMIN_INITIAL_PASSWORD='<UAT admin password; the browser suite logs in with it>'
+# Optional: if the UAT admin password is changed later, add the key the browser suite prefers:
+#   kubectl -n issue-tracker-uat patch secret issue-tracker-app -p '{"stringData":{"E2E_ADMIN_PASSWORD":"<current>"}}'
 
 kubectl -n issue-tracker create secret generic issue-tracker-db \
   --from-literal=POSTGRES_USER=issue_tracker --from-literal=POSTGRES_DB=issue_tracker \
