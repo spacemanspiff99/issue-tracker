@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -41,11 +40,19 @@ def run_cli(tmp_path, root: Path, *extra: str) -> subprocess.CompletedProcess[st
     )
 
 
+def write_doc(root: Path, folder: str, name: str, body: str) -> None:
+    path = root / "documentation" / folder / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+
+
 def test_cli_dry_run_import_and_rerun(tmp_path):
     root = tmp_path / "repo"
-    shutil.copytree(REPO_ROOT / "documentation" / "issues", root / "documentation" / "issues")
-    (root / "documentation" / "sprints").mkdir()
-    shutil.copy(REPO_ROOT / "documentation/sprints/0007-local-manual-uat-readiness.md", root / "documentation/sprints")
+    write_doc(root, "sprints", "0001-seed.md", "# Sprint 0001: Seed Sprint\n\nStatus: planned\n")
+    issue = "# Issue {n}: Seed {n}\n\nStatus: {s}\nCategory gates: `QA-1`\nSprint: Sprint 0001\n\n"
+    issue += "## Acceptance Criteria\n\n- [ ] works\n"
+    write_doc(root, "issues", "0002-a.md", issue.format(n="0002", s="backlog"))
+    write_doc(root, "issues", "0003-b.md", issue.format(n="0003", s="in review (PR open)"))
     bootstrap = "from issue_tracker.db import engine; from issue_tracker.domain.models import Base;"
     bootstrap += "Base.metadata.create_all(engine)"
     env = {"DATABASE_URL": f"sqlite+pysqlite:///{tmp_path / 'cli.db'}"}
@@ -53,18 +60,17 @@ def test_cli_dry_run_import_and_rerun(tmp_path):
 
     dry = run_cli(tmp_path, root, "--dry-run")
     assert dry.returncode == 0, dry.stderr
-    assert "create: issue 0017 Import Markdown Issues And Sprints Into The Tracker" in dry.stdout
-    assert "create: sprint 0007 Local Manual UAT Readiness" in dry.stdout
-    assert dry.stdout.strip().splitlines()[-1].startswith("dry-run: would have ")
-    assert not dry.stdout.strip().splitlines()[-1].startswith("dry-run: would have 0 created")
+    assert "create: issue 0003 Seed 0003 [in-progress]" in dry.stdout
+    assert "create: sprint 0001 Seed Sprint" in dry.stdout
+    assert dry.stdout.strip().splitlines()[-1] == "dry-run: would have 5 created / 0 updated / 0 unchanged"
 
     first = run_cli(tmp_path, root)
     assert first.returncode == 0, first.stderr
-    assert "dry-run" not in first.stdout
+    assert first.stdout.strip().splitlines()[-1] == "5 created / 0 updated / 0 unchanged"
 
     second = run_cli(tmp_path, root)
     assert second.returncode == 0, second.stderr
-    assert second.stdout.strip().splitlines()[-1].startswith("0 created / 0 updated / ")
+    assert second.stdout.strip().splitlines()[-1] == "0 created / 0 updated / 4 unchanged"
 
 
 def test_cli_reports_collision_without_traceback(tmp_path):
