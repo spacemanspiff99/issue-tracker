@@ -19,6 +19,8 @@ Make the Issue Tracker MVP ready for local manual UAT by proving the local runti
 | Issue 0013 | Reconcile Schema Drift Before Production Data | claude-opus-5-5 high | Migrations and models agree; drift check is 0 in CI. |
 | Issue 0014 | Playwright Workflow Suite With Step Screenshots | claude-opus-5-5 medium | Every UI workflow is driven by Playwright with a screenshot per step. |
 | Issue 0015 | Label 192.168.10.8 As Production In The Pipeline | claude-opus-5-5 high | Production deploys are named, gated, and backed up as production. |
+| Issue 0017 | Import Markdown Issues And Sprints Into The Tracker | claude-opus-5-5 low | Markdown tracker seeds a project idempotently with sequence IDs preserved. |
+| Issue 0018 | Remove Stale "Mislabels Production" Guidance | claude-opus-5-5 medium | Claude guidance names the production pipeline job, inputs, and gates as they are now. |
 
 ## Sequential Role Review
 
