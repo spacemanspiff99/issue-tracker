@@ -62,3 +62,7 @@ Stop only after Sprint 0007 says one of:
 - Local manual UAT not ready, with exact blockers and owner actions.
 
 Do not expand this sprint into production deployment, GitHub issue sync, multi-user auth, drag/drop planning, or full markdown migration.
+
+## Production Readiness
+
+Orchestrator prompt for sub-session execution of this sprint through production on `192.168.10.8`: [`../prompts/0016-production-readiness-orchestrator.md`](../prompts/0016-production-readiness-orchestrator.md).
