@@ -1,4 +1,4 @@
-# Issue 0017: Remove Stale "Mislabels Production" Guidance
+# Issue 0018: Remove Stale "Mislabels Production" Guidance
 
 Status: backlog
 Recommended model: claude-opus-5-5 medium

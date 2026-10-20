@@ -17,7 +17,7 @@ Sprint: Sprint 0007
 
 ## Acceptance Criteria
 
-- [x] No file labels `192.168.10.8` as dev. Evidence: `grep -rn -i "dev_host\|promote_dev\|downstream\|environment: dev\|promote to dev" .github documentation deployment` matches only `current_dev_host` (`192.168.10.20`, the real dev host) and this issue's Problem text; `grep -rn "192.168.10.8"` shows only production labels; YAML loads. Guidance outside this lane (`CLAUDE.md`, `.claude/`) still says "mislabels" → [Issue 0017](0017-guidance-stale-production-label.md).
+- [x] No file labels `192.168.10.8` as dev. Evidence: `grep -rn -i "dev_host\|promote_dev\|downstream\|environment: dev\|promote to dev" .github documentation deployment` matches only `current_dev_host` (`192.168.10.20`, the real dev host) and this issue's Problem text; `grep -rn "192.168.10.8"` shows only production labels; YAML loads. Guidance outside this lane (`CLAUDE.md`, `.claude/`) still says "mislabels" → [Issue 0018](0018-guidance-stale-production-label.md).
 - [x] Production job depends on UAT, takes a backup before migrating, and checks `/health` database status. Evidence: `deploy-prod` has `needs: deploy-uat`, `if: inputs.promote_prod && needs.deploy-uat.result == 'success'`, and a step refusing a SHA different from UAT's recorded SHA; `remote-compose-deploy.sh` refuses `SKIP_DB_BACKUP=1` for `DEPLOY_ENV=uat|prod` (stub run: exit 2) and the health loop requires `"database": "ok"` (stub run: `{"database":"error"}` → exit 1 after 10 attempts; healthy → exit 0 with `pg_dump` + `cp` logged before `alembic upgrade head`).
 - [ ] GitHub `prod` environment protection is configured (owner action; record when done). Pending: owner creates `prod` under Settings -> Environments with a required reviewer.
 
