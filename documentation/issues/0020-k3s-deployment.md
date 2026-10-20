@@ -16,6 +16,17 @@ The owner wants production on the home-lab k3s cluster instead of Docker Compose
 - Image: built by GitHub Actions, pushed to `ghcr.io/spacemanspiff99/issue-tracker:<sha>`; cluster pulls with an imagePullSecret.
 - Namespaces: `issue-tracker-uat` (UAT) and `issue-tracker` (production). UAT on k3s replaces the `.18` Compose UAT for releases.
 
+## Storage Sizing (owner constraint: storage is tight)
+
+Data volume is tiny: ~45 markdown issues/sprints today (192 KB of docs). Even 10,000 issues with events and AC is ~100-200 MB in Postgres. The real consumers are fixed overhead, so size for that:
+
+| PVC (per namespace) | Request | Why |
+| --- | --- | --- |
+| Postgres data | 2Gi | ~40 MB empty cluster + data + WAL capped with `max_wal_size=256MB`, `min_wal_size=64MB`, `wal_keep_size=0` |
+| Backups | 1Gi | `pg_dump -Fc` is <5 MB at today's size; keep 14 daily + last 5 pre-migration dumps, prune older in the CronJob |
+
+UAT + prod = 6Gi requested. Multiply by the storage class replica count (e.g. Longhorn 3 replicas = 18Gi raw). UAT may use 1 replica. Set Postgres resources small (requests 100m CPU / 256Mi RAM). Document `kubectl df`-style checks (`kubectl get pvc -A`, Longhorn UI, or `df` on nodes) and the resize procedure (`allowVolumeExpansion` + edit PVC) in the guide.
+
 ## Scope
 
 - `deployment/k8s/`: kustomize base (app Deployment, Service, Ingress, Postgres StatefulSet + headless Service + PVC, ConfigMap, Secret *template only*, pre-deploy backup Job, migration Job, backup CronJob) and overlays `uat` and `prod`. Storage class, ingress host, and resources are overlay values with documented defaults.
@@ -33,6 +44,7 @@ The owner wants production on the home-lab k3s cluster instead of Docker Compose
 - [ ] Prod job cannot run without UAT success on the same SHA in the same run, and never skips the backup Job.
 - [ ] No secret values in git (`git grep` for password/token patterns clean; secret manifests are `*.example.yaml`).
 - [ ] `documentation/guides/k3s.md` lists every owner action, in order, with exact commands.
+- [ ] PVC requests and Postgres WAL settings match the Storage Sizing table; backup CronJob prunes to the retention above.
 - [ ] `documentation/guides/deployment.md` points to k3s for UAT/prod; Compose stays documented for local dev only.
 
 ## Category Checklists
