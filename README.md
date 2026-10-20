@@ -37,6 +37,8 @@ docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker
 docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker import-json exports/project-1.json Imported --category-map IT-1=IT-1
 ```
 
+Claude Code guidance: `CLAUDE.md` and `.claude/` (see `.claude/README.md`).
+
 Project planning remains in `documentation/planning/PROJECT_PLAN.md`; recurring issue categories remain in `documentation/standards/ISSUE_LOG.md`.
 
 Current planning additions:
@@ -44,6 +46,7 @@ Current planning additions:
 - `documentation/planning/EXTERNAL_RULE_REVIEW.md` records the GitHub rule review and GPT-5.5 medium/high guidance changes.
 - `documentation/guides/manual-uat.md` is the browser and command checklist for local manual UAT.
 - `documentation/uat/TEMPLATE-local-uat.md` is the notes template for a UAT run.
+- `documentation/prompts/0016-production-readiness-orchestrator.md` drives Sprint 0007 to production on `192.168.10.8` with sub-sessions.
 - `documentation/sprints/0007-local-manual-uat-readiness.md` is the next sprint to get the MVP ready for local manual UAT.
 - `documentation/sprints/0008-subagent-local-uat-quality-iteration.md` decomposes the local UAT push into subagent-sized worker scopes.
 - `documentation/issues/0008-local-runtime-gate.md` through `documentation/issues/0012-uat-findings-and-release-decision.md` are the sprint issues.

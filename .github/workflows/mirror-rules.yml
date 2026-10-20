@@ -12,6 +12,7 @@ on:
       - "**/AGENTS.md"
       - "**/AGENTS.override.md"
       - "CLAUDE.md"
+      - ".claude/**"
       - ".github/workflows/mirror-rules.yml"
   workflow_dispatch: {}
 
@@ -47,7 +48,7 @@ jobs:
           RULE_DEST="vibecoding/projects/${PROJECT_NAME}/cursor-rules"
           SKILL_DEST="vibecoding/projects/${PROJECT_NAME}/cursor-skills"
           CODEX_DEST="vibecoding/projects/${PROJECT_NAME}/codex-guidance"
-          CLAUDE_DEST="vibecoding/projects/${PROJECT_NAME}/claude-memory"
+          CLAUDE_DEST="vibecoding/projects/${PROJECT_NAME}/claude-guidance"
           mkdir -p "${RULE_DEST}" "${SKILL_DEST}" "${CODEX_DEST}" "${CLAUDE_DEST}"
           find "${RULE_DEST}" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exec rm -rf {} +
           find "${SKILL_DEST}" -mindepth 1 -maxdepth 1 ! -name ".gitkeep" -exec rm -rf {} +
@@ -84,6 +85,11 @@ jobs:
           if [ -f source/CLAUDE.md ]; then
             cp source/CLAUDE.md "${CLAUDE_DEST}/CLAUDE.md"
           fi
+          if [ -d source/.claude ]; then
+            mkdir -p "${CLAUDE_DEST}/.claude"
+            cp -a source/.claude/. "${CLAUDE_DEST}/.claude/"
+            rm -f "${CLAUDE_DEST}/.claude/settings.local.json"
+          fi
           cat > "${RULE_DEST}/.mirror-source.json" <<EOF
           {
             "project": "${PROJECT_NAME}",
@@ -108,7 +114,7 @@ jobs:
           git add "projects/${PROJECT_NAME}/cursor-rules" \
                   "projects/${PROJECT_NAME}/cursor-skills" \
                   "projects/${PROJECT_NAME}/codex-guidance" \
-                  "projects/${PROJECT_NAME}/claude-memory"
+                  "projects/${PROJECT_NAME}/claude-guidance"
           if git diff --cached --quiet; then
             echo "No guidance changes to mirror."
             exit 0
