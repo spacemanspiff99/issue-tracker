@@ -1,4 +1,4 @@
-# Issue 0019: Resolve Shared-Sequence Collision On 0008
+# Issue 0033: Resolve Shared-Sequence Collision On 0008
 
 Status: backlog
 Recommended model: claude-opus-5-5 medium

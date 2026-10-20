@@ -1,4 +1,4 @@
-# Issue 0020: Adding A Closed Issue To A Sprint Reopens It
+# Issue 0034: Adding A Closed Issue To A Sprint Reopens It
 
 Status: backlog
 Recommended model: claude-opus-5-5 medium
