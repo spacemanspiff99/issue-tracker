@@ -37,6 +37,8 @@ docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker
 docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker import-json exports/project-1.json Imported --category-map IT-1=IT-1
 ```
 
+Claude Code guidance: `CLAUDE.md` and `.claude/` (see `.claude/README.md`).
+
 Project planning remains in `documentation/planning/PROJECT_PLAN.md`; recurring issue categories remain in `documentation/standards/ISSUE_LOG.md`.
 
 Current planning additions:

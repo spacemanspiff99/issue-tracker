@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest:*)",
+      "Bash(python -m ruff check:*)",
+      "Bash(python -m issue_tracker.mcp.server --smoke)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch --show-current)",
+      "Bash(docker compose -f deployment/docker-compose.local.yml config:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./backups/**)"
+    ]
+  }
+}
