@@ -1,6 +1,6 @@
 # Issue 0017: Import Markdown Issues And Sprints Into The Tracker
 
-Status: backlog
+Status: in-progress (blocked on Issue 0033 for the full-repo run)
 Recommended model: claude-opus-5-5 low
 Category gates: `IT-1`, `IT-2`
 Sprint: Sprint 0007
@@ -19,11 +19,20 @@ Until production is live, the tracker of record is markdown in `documentation/is
 
 ## Acceptance Criteria
 
-- [ ] `import-markdown --dry-run` on this repo lists every issue and sprint and writes nothing (verified by row counts before/after).
-- [ ] Real run creates one tracker issue per markdown issue with matching `NNNN`, title, status, and AC.
-- [ ] Categories come from each file's `Category gates`, created per project; no `IT-*` literal in app logic.
-- [ ] Second run reports 0 created / 0 updated.
-- [ ] Unit tests cover parse, dry-run, import, and idempotent re-run; `python -m ruff check . && python -m pytest -q tests` green.
+- [ ] `import-markdown --dry-run` on this repo lists every issue and sprint and writes nothing (verified by row counts before/after). **Blocked by Issue 0033:** the repo tree has `0008` as both an issue and a sprint, and the importer refuses it (`import-markdown: Sequence 0008 used by ...`, exit 1). On a copy without `sprints/0008-*`: 18 actions listed, row counts 0 → 0 across projects/categories/issues/sprints/sprint_issues/issue_events.
+- [ ] Real run creates one tracker issue per markdown issue with matching `NNNN`, title, status, and AC. **Blocked by Issue 0033** for this repo. On the same copy: 10 issues `0008`–`0018` with matching title/status/AC, `next_sequence` 19; `test_import_preserves_sequence_title_status_ac_and_sprint` covers it.
+- [x] Categories come from each file's `Category gates`, created per project; no `IT-*` literal in app logic. Names/checklists come from each file's `Category Checklists` (6 `IT-*` rows created); `grep -rn "IT-[0-9]" src/issue_tracker` → none; `test_categories_are_project_scoped...` passes.
+- [x] Second run reports 0 created / 0 updated. Copy rerun: `0 created / 0 updated / 17 unchanged`, row counts unchanged; `test_second_run_reports_no_changes`, `test_cli_dry_run_import_and_rerun`.
+- [x] Unit tests cover parse, dry-run, import, and idempotent re-run; `python -m ruff check . && python -m pytest -q tests` green (38 passed).
+
+## Implementation Notes
+
+- `src/issue_tracker/markdown_import.py` parses and diffs the files; every write goes through `ProjectService`/`CategoryService`/`IssueService`/`SprintService`.
+- Added to the service layer: `create_issue(..., sequence=)` and `create_sprint(..., sequence=, status=)` (an explicit sequence is rejected if any issue or sprint already uses it, and `next_sequence` is raised above it), `IssueService.update_details`, plus sprint/project lookups. Web and MCP don't expose explicit sequences: that's import-only by design.
+- Free-text status lines are normalized by prefix (`in review ...` → `in-progress`, `closed` → `done`); anything else fails with the file path.
+- Primary category = first `Category gates` key; all gate keys are stored in `labels`.
+- Closed issues are never re-added to a sprint (that would trip Issue 0034).
+- Found and recorded outside this lane's scope: Issue 0033 (0008 collision), Issue 0034 (`add_issue` reopens closed issues).
 
 ## Category Checklists
 

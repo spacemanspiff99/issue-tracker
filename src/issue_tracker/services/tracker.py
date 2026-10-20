@@ -103,6 +103,9 @@ class ProjectService:
     def get_project(self, project_id: int) -> Project:
         return self.repo.get_project(project_id)
 
+    def get_project_by_name(self, name: str) -> Project | None:
+        return self.repo.get_project_by_name(name.strip())
+
     def _commit(self) -> None:
         try:
             self.session.commit()
@@ -163,6 +166,7 @@ class IssueService:
         proposed_approach: str | None = None,
         category_id: int | None = None,
         labels: list[str] | None = None,
+        sequence: int | None = None,
     ) -> Issue:
         if not title.strip():
             raise DomainError("Issue title is required")
@@ -171,7 +175,7 @@ class IssueService:
         category = self.repo.get_category(category_id)
         if category and category.project_id != project_id:
             raise DomainError("Category belongs to another project")
-        sequence = self.repo.allocate_sequence(project_id)
+        sequence = _allocate(self.repo, project_id, sequence)
         issue = Issue(
             project_id=project_id,
             sequence=sequence,
@@ -192,6 +196,29 @@ class IssueService:
 
     def get_issue(self, issue_id: int) -> Issue:
         return self.repo.get_issue(issue_id)
+
+    def update_details(
+        self,
+        issue_id: int,
+        title: str,
+        acceptance_criteria: str,
+        category_id: int | None,
+        actor: str | None = None,
+    ) -> Issue:
+        if not title.strip():
+            raise DomainError("Issue title is required")
+        if not acceptance_criteria.strip():
+            raise DomainError("Acceptance criteria are required")
+        issue = self.repo.get_issue(issue_id)
+        category = self.repo.get_category(category_id)
+        if category and category.project_id != issue.project_id:
+            raise DomainError("Category belongs to another project")
+        issue.title = title.strip()
+        issue.acceptance_criteria = acceptance_criteria.strip()
+        issue.category_id = category_id
+        record_event(self.session, issue.id, "updated", "Title, acceptance criteria, or category changed", actor)
+        self._commit("Issue violates a database invariant")
+        return issue
 
     def get_issue_by_sequence(self, project_id: int, sequence: int) -> Issue:
         issue = self.repo.get_issue_by_sequence(project_id, sequence)
@@ -276,18 +303,28 @@ class SprintService:
         self.session = session
         self.repo = Repository(session)
 
-    def create_sprint(self, project_id: int, goal: str, context: str | None = None) -> Sprint:
+    def create_sprint(
+        self,
+        project_id: int,
+        goal: str,
+        context: str | None = None,
+        sequence: int | None = None,
+        status: str = SprintStatus.ACTIVE.value,
+    ) -> Sprint:
         if not goal.strip():
             raise DomainError("Sprint goal is required")
-        sequence = self.repo.allocate_sequence(project_id)
+        sprint_status = SprintStatus(status)
+        sequence = _allocate(self.repo, project_id, sequence)
         sprint = Sprint(
             project_id=project_id,
             sequence=sequence,
             slug=slugify(sequence, goal),
             goal=goal.strip(),
             context=context or None,
-            status=SprintStatus.ACTIVE,
+            status=sprint_status,
         )
+        if sprint_status == SprintStatus.CLOSED:
+            sprint.closed_at = datetime.now(UTC)
         self.repo.add(sprint)
         self._commit("Sprint violates a database invariant")
         return sprint
@@ -319,6 +356,15 @@ class SprintService:
 
     def get_sprint(self, sprint_id: int) -> Sprint:
         return self.repo.get_sprint(sprint_id)
+
+    def get_sprint_by_sequence(self, project_id: int, sequence: int) -> Sprint | None:
+        return self.repo.get_sprint_by_sequence(project_id, sequence)
+
+    def list_sprints(self, project_id: int) -> list[Sprint]:
+        return self.repo.list_sprints(project_id)
+
+    def list_issues(self, sprint_id: int) -> list[SprintIssue]:
+        return self.repo.list_sprint_issues(sprint_id)
 
     def next_action(self, project_id: int) -> dict[str, object]:
         active = self.repo.active_sprint(project_id)
@@ -367,6 +413,16 @@ class IssueLogService:
 
     def list_entries(self, project_id: int) -> list[IssueLogEntry]:
         return self.repo.list_issue_logs(project_id)
+
+
+def _allocate(repo: Repository, project_id: int, requested: int | None) -> int:
+    if requested is None:
+        return repo.allocate_sequence(project_id)
+    if requested < 1:
+        raise DomainError("Sequence must be positive")
+    if repo.sequence_in_use(project_id, requested):
+        raise DomainError(f"Sequence {display_id(requested)} is already used in this project")
+    return repo.allocate_sequence(project_id, requested)
 
 
 def compact_issue(issue: Issue) -> dict[str, object]:

@@ -41,14 +41,27 @@ class Repository:
     def list_projects(self) -> list[Project]:
         return list(self.session.scalars(select(Project).order_by(Project.name)))
 
-    def allocate_sequence(self, project_id: int) -> int:
+    def get_project_by_name(self, name: str) -> Project | None:
+        return self.session.scalar(select(Project).where(Project.name == name))
+
+    def allocate_sequence(self, project_id: int, requested: int | None = None) -> int:
         stmt: Select[tuple[Project]] = select(Project).where(Project.id == project_id).with_for_update()
         project = self.session.scalar(stmt)
         if project is None:
             raise KeyError(f"Project {project_id} was not found")
+        if requested is not None:
+            # Explicit sequences (markdown seed import) keep the shared counter above every used ID.
+            project.next_sequence = max(project.next_sequence, requested + 1)
+            return requested
         sequence = project.next_sequence
         project.next_sequence += 1
         return sequence
+
+    def sequence_in_use(self, project_id: int, sequence: int) -> bool:
+        return (
+            self.get_issue_by_sequence(project_id, sequence) is not None
+            or self.get_sprint_by_sequence(project_id, sequence) is not None
+        )
 
     def get_category(self, category_id: int | None) -> Category | None:
         return self.session.get(Category, category_id) if category_id else None
@@ -116,6 +129,16 @@ class Repository:
         if sprint is None:
             raise KeyError(f"Sprint {sprint_id} was not found")
         return sprint
+
+    def get_sprint_by_sequence(self, project_id: int, sequence: int) -> Sprint | None:
+        return self.session.scalar(
+            select(Sprint).where(Sprint.project_id == project_id, Sprint.sequence == sequence)
+        )
+
+    def list_sprints(self, project_id: int) -> list[Sprint]:
+        return list(
+            self.session.scalars(select(Sprint).where(Sprint.project_id == project_id).order_by(Sprint.sequence))
+        )
 
     def active_sprint(self, project_id: int) -> Sprint | None:
         return self.session.scalar(
