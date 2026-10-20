@@ -1,6 +1,6 @@
 # Issue 0019: Web Routes 500 On Domain Errors; Blank LLM Closes Issues; Close Metadata Hidden
 
-Status: in-review (PR open; close after merge)
+Status: done (merged in #12, a98b164)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-1`, `IT-5`
 Sprint: Sprint 0007
