@@ -56,7 +56,7 @@ def test_cli_dry_run_import_and_rerun(tmp_path):
     assert "create: issue 0017 Import Markdown Issues And Sprints Into The Tracker" in dry.stdout
     assert "create: sprint 0007 Local Manual UAT Readiness" in dry.stdout
     assert dry.stdout.strip().splitlines()[-1].startswith("dry-run: would have ")
-    assert "0 created" not in dry.stdout
+    assert not dry.stdout.strip().splitlines()[-1].startswith("dry-run: would have 0 created")
 
     first = run_cli(tmp_path, root)
     assert first.returncode == 0, first.stderr
