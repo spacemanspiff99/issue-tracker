@@ -1,6 +1,6 @@
 # Issue 0020: Deploy UAT And Production To The Home-Lab k3s Cluster
 
-Status: in progress (PR open; CI proof on kind)
+Status: in review (PR #13). All AC pass on a disposable kind cluster in CI; the first real-cluster run waits on the owner actions in `documentation/guides/k3s.md`.
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`, `IT-3`, `IT-5`
 Sprint: Sprint 0007
@@ -39,13 +39,22 @@ UAT + prod = 6Gi requested. Multiply by the storage class replica count (e.g. Lo
 
 ## Acceptance Criteria
 
-- [ ] `kubectl kustomize deployment/k8s/overlays/uat` and `.../prod` render cleanly; `kubeconform -strict` (or equivalent) passes on both, run in CI.
-- [ ] A local kind or k3d cluster in CI/cloud: deploy the `uat` overlay with a locally built image, backup Job then migrate Job complete, app rollout ready, `/health` returns `"database": "ok"`, and `tests/e2e` passes against it (if 0014's suite is merged).
-- [ ] Prod job cannot run without UAT success on the same SHA in the same run, and never skips the backup Job.
-- [ ] No secret values in git (`git grep` for password/token patterns clean; secret manifests are `*.example.yaml`).
-- [ ] `documentation/guides/k3s.md` lists every owner action, in order, with exact commands.
-- [ ] PVC requests and Postgres WAL settings match the Storage Sizing table; backup CronJob prunes to the retention above.
-- [ ] `documentation/guides/deployment.md` points to k3s for UAT/prod; Compose stays documented for local dev only.
+- [x] `kubectl kustomize deployment/k8s/overlays/uat` and `.../prod` render cleanly; `kubeconform -strict` (or equivalent) passes on both, run in CI.
+- [x] A local kind or k3d cluster in CI/cloud: deploy the `uat` overlay with a locally built image, backup Job then migrate Job complete, app rollout ready, `/health` returns `"database": "ok"`, and `tests/e2e` passes against it (if 0014's suite is merged).
+- [x] Prod job cannot run without UAT success on the same SHA in the same run, and never skips the backup Job.
+- [x] No secret values in git (`git grep` for password/token patterns clean; secret manifests are `*.example.yaml`).
+- [x] `documentation/guides/k3s.md` lists every owner action, in order, with exact commands.
+- [x] PVC requests and Postgres WAL settings match the Storage Sizing table; backup CronJob prunes to the retention above.
+- [x] `documentation/guides/deployment.md` points to k3s for UAT/prod; Compose stays documented for local dev only.
+
+## Evidence (PR #13, CI run 39457751529, job `k8s`)
+
+- Render + `kubeconform -strict`: CI step "Render and validate overlays" over `uat`, `uat/jobs`, `prod`, `prod/jobs`; also run locally: 8/2/8/2 resources valid, 0 invalid.
+- kind: `deployment/k8s/tests/kind-smoke.sh` ran two full deploys: backup Job wrote `/backups/pre-migration/<sha>-<ts>.dump`, migrate Job ran `0001`→`0004`, rollout succeeded, in-pod `health: {"ok":true,"database":"ok"}`. Then `tests/e2e` from a one-off pod: 16 passed, 6 xfailed, 70 screenshots uploaded (`k8s-e2e-screenshots`).
+- Backup is enforced: a migrate Job whose SHA has no dump failed in its `require-backup` init container ("refusing to migrate"). `deploy.sh` has no skip flag. In `k3s-pipeline.yml`, `deploy-prod` needs `deploy-uat`, has `if: promote_prod && needs.deploy-uat.result == 'success'`, refuses on a SHA mismatch, and uses `environment: prod`. That last part is checked by reading the workflow only: it can run only on the owner's runner.
+- Retention: 20 seeded daily and 8 pre-migration dumps went through one CronJob run, leaving `daily=14 pre-migration=5`, with both real dumps kept. PVCs `data-issue-tracker-postgres-0` 2Gi and `issue-tracker-backups` 1Gi are Bound. Postgres args `max_wal_size=256MB`, `min_wal_size=64MB`, `wal_keep_size=0`; requests 100m/256Mi.
+- Secrets: CI step "No secret values in deployment/k8s" passes. The only Secret manifests are `deployment/k8s/secrets/*.example.yaml`, which hold `REPLACE_WITH_*` placeholders and are not referenced by any kustomization.
+- Needs the owner's real cluster: the first `k3s-pipeline.yml` run (GHCR push and pull, ingress `/health`, `prod` reviewer gate) and the Compose-to-k3s production data move (guide steps 9-11).
 
 ## Category Checklists
 
