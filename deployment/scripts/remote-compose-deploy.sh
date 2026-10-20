@@ -11,6 +11,7 @@ run_browser_uat="${RUN_BROWSER_UAT:-0}"
 skip_db_backup="${SKIP_DB_BACKUP:-0}"
 run_tests="${RUN_TESTS:-0}"
 run_ruff="${RUN_RUFF:-0}"
+deploy_env="${DEPLOY_ENV:-}"
 release_id="${GITHUB_SHA:-manual}-$(date -u +%Y%m%d%H%M%S)"
 remote="${target_user}@${target_host}"
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
@@ -20,6 +21,15 @@ fi
 if [ -n "${DEPLOY_KNOWN_HOSTS_PATH:-}" ]; then
   ssh_opts+=(-o "UserKnownHostsFile=$DEPLOY_KNOWN_HOSTS_PATH" -o StrictHostKeyChecking=yes)
 fi
+
+case "$deploy_env" in
+  uat|prod)
+    if [ "$skip_db_backup" = "1" ]; then
+      echo "Refusing SKIP_DB_BACKUP=1 for DEPLOY_ENV=$deploy_env: no backup, no migration" >&2
+      exit 2
+    fi
+    ;;
+esac
 
 case "$deploy_path" in
   /home/*/issue-tracker|/opt/issue-tracker|/srv/issue-tracker) ;;
@@ -85,7 +95,9 @@ ssh "${ssh_opts[@]}" "$remote" \
    fi
    docker compose -f '$compose_file' up -d
    for attempt in 1 2 3 4 5 6 7 8 9 10; do
-     if curl -fsS '$app_base_url/health'; then
+     if health=\$(curl -fsS '$app_base_url/health') &&
+        printf '%s' \"\$health\" | grep -Eq '\"database\": *\"ok\"'; then
+       printf '%s\\n' \"\$health\"
        break
      fi
      if [ \"\$attempt\" = 10 ]; then
