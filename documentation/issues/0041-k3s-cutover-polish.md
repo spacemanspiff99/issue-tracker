@@ -1,6 +1,6 @@
 # Issue 0041: k3s Cutover Polish Before The First Real Run
 
-Status: in-progress
+Status: in-progress (PR #25, CI green on 2578a4a; awaiting independent review)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
@@ -17,13 +17,21 @@ cheap items before the owner's first real cutover.
 
 ## Acceptance Criteria
 
-- [ ] **BLOCKER (from #22, seen in PR #14's k8s job, run 39554288587):** the first deploy into a fresh namespace raced Postgres's init. The image entrypoint runs a temporary socket-only server before `CREATE DATABASE`; the socket-based `pg_isready` probe passed, and `db_version` failed with `FATAL: database "issue_tracker" does not exist`. Fixed two ways: the readiness and liveness probes use TCP (`pg_isready -h 127.0.0.1`), and `deploy.sh` waits in a bounded loop for `psql -h 127.0.0.1 -c 'select 1'` before reading the version, failing with a clear message on timeout. Proven in kind by 3 extra first deploys, each into a deleted and recreated namespace and volume.
-- [ ] NB1: `restore.sh` no longer has `|| true` on the scale-to-0 or on the pod wait; only a missing Deployment is tolerated. Proven in kind: an app pod held by a finalizer aborts the restore before any restore Job (and so before any safety dump or restore) is created.
-- [ ] NB2: `k3s.md` "What a deploy does" step 3 says a GitHub cancel probably doesn't run the cleanup, that the safe outcome is the app at 0 with the migrate Job maybe still running, and points to "Found the app at 0 replicas".
-- [ ] NB3: both cutover restores in `k3s.md` (12b, 12c) use `--keep-app-down` and say the next deploy brings the app up.
-- [ ] NB4: `image.yml` uses the concurrency group `image-<sha>`, so a push-to-main build and a pipeline run for the same commit can't race. The `k3s.md` wording no longer says a digest mismatch happens "only if main moved".
-- [ ] NB5: kind case: the migration times out (its pod is blocked by a ResourceQuota), the Jobs are deleted, the version is unchanged, and the app scales back up.
-- [ ] CI green on the PR.
+Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/39554798198 (head `2578a4a`, 5/5 green), job `k8s`. Line refs are as of `2578a4a`.
+
+- [x] **BLOCKER (from #22, seen in PR #14's k8s job, run 39554288587): first deploy into a fresh namespace raced Postgres's init.**
+  - Cause: on a fresh volume the entrypoint first runs a temporary socket-only server before `CREATE DATABASE`. The socket `pg_isready` passed, and `db_version` hit `FATAL: database "issue_tracker" does not exist`.
+  - Fix: the probes use TCP (`postgres.yaml:68,72`, `pg_isready -h 127.0.0.1`). `deploy.sh:143-153` waits in a bounded loop for a TCP `select 1` before reading the version, and on timeout fails with a clear message plus the Postgres log.
+  - kind (`kind-smoke.sh:360`): 3 extra first deploys, each into a deleted and recreated namespace and volume. Each printed "postgres: accepting connections", "alembic_version before deploy: (none)" and a healthy `/health`, then "ok: fresh deploy 1/2/3". The main first deploy passed too.
+- [x] **NB1: `restore.sh` aborts before the dump if the app can't be stopped.**
+  - The scale-to-0 and the pod wait no longer have `|| true` (`restore.sh:50-70`); only a missing Deployment is tolerated.
+  - kind (`kind-smoke.sh:264`), app pod held by a finalizer: printed "app pod still present after 120s" and "ok: restore aborted before any restore Job when the app pod would not stop".
+- [x] **NB2:** `k3s.md:317` ("A cancelled run is different") says a GitHub cancel force-kills the step about 10s after the signal, so the cleanup usually doesn't finish; expect the app at 0 with the migrate Job maybe still running, and see "Found the app at 0 replicas".
+- [x] **NB3:** both cutover restores in `k3s.md` use `--keep-app-down` (`k3s.md:267`, `k3s.md:286`), and the text says the next deploy migrates the data and brings the app up.
+- [x] **NB4:** `image.yml:28` adds the concurrency group `image-${{ github.sha }}`. `k3s.md:216-221` and step 12c now give both causes of a digest mismatch (`main` moved, or the GHCR tag was deleted or overwritten) and explain the concurrency group.
+- [x] **NB5: migrate timeout with the version unchanged brings the old app back.** kind (`kind-smoke.sh:233`): a quota blocked the migrate pod, and the log showed "deploy failed during: migrate", then "Jobs deleted and alembic_version unchanged (0004_reconcile_schema_drift); restoring the previous app (replicas=1)", then "ok: migrate timed out -> … old app scaled back up".
+- [x] **Also found and fixed:** `kubectl wait --for=delete pod -l …` errors ("no matching resources") when the selector is already empty. Both scripts now poll with `wait_app_gone` (`deploy.sh:120`, `restore.sh:50`).
+- [x] **CI green on the PR:** 5/5 on `2578a4a`.
 
 ## Category Checklists
 
