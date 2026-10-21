@@ -1,4 +1,4 @@
-# Sprint 0008: Subagent Local UAT Quality Iteration
+# Sprint 0035: Subagent Local UAT Quality Iteration
 
 Status: planned
 Recommended parent model: GPT-5.5 high
@@ -178,7 +178,7 @@ Exit condition: import/export and local reset instructions are safe enough for m
 ### Worker 06: UAT Findings And Release Closeout
 
 Recommended model: GPT-5.5 high
-Ownership: `documentation/uat/`, `documentation/sprints/0007-local-manual-uat-readiness.md`, `documentation/sprints/0008-subagent-local-uat-quality-iteration.md`.
+Ownership: `documentation/uat/`, `documentation/sprints/0007-local-manual-uat-readiness.md`, `documentation/sprints/0035-subagent-local-uat-quality-iteration.md`.
 
 Tasks:
 
@@ -214,7 +214,7 @@ Exit condition: the sprint closeout says one of `ready`, `ready with caveats`, o
 
 ## Validation Gate
 
-Run this final gate before closing Sprint 0008:
+Run this final gate before closing Sprint 0035:
 
 ```bash
 docker compose -f deployment/docker-compose.local.yml config
