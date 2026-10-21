@@ -1,6 +1,6 @@
 # Issue 0048: Restore/Deploy Concurrency Follow-Ups
 
-Status: in-progress
+Status: in-progress (PR #30, green on c7f24f1; awaiting review)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
@@ -18,15 +18,21 @@ restore/deploy overlaps, and make the lock and test harness stricter.
 
 ## Acceptance Criteria
 
-- [ ] **1:** `restore.sh` refuses while a restore pod is live without an active Job, before the lock
-  and again just before its Job. The Job then keeps only its own pin.
-- [ ] **2:** `release_lock` deletes the lock only when `data.job` names this run (restore and deploy).
-- [ ] **3:** `deploy.sh` takes `issue-tracker-restore-lock`, refuses if it is held, and releases it on
-  exit with the same `job_may_run` rule (kept while the backup/migrate Jobs may still run).
-- [ ] **4:** `fail-closed.sh` exits 2 with "needs kubectl" when kubectl is missing.
-- [ ] **5:** the N-3 messages say "revision unchanged".
-- [ ] Each item has a case that fails on `b35e8fb` (where applicable) and a mutation that it catches.
-- [ ] CI 5/5, including the kind smoke.
+Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/39599719190 (head `c7f24f1`, 5/5 green), job `k8s`.
+
+- [x] **1: live restore pods refused.** `restore.sh` refuses while a restore pod is live (not Succeeded or Failed) without an active Job. `live_restore_pods` runs before the lock and again just before the Job. The Job then removes every pin but its own, and `KEEP_PINS` is gone.
+  - Cases: a live pod refuses before anything; a pod that starts meanwhile is refused before the Job; the pod list unreadable before and after the lock. Control: finished pods don't block. `[job] every pin but its own removed`.
+  - kind: "refusing: restore pod(s) still running in issue-tracker-uat without an active Job: fake-running-restore", with the app (1) and the lock untouched. The next restore removed `killed-pod.dump` and `killed-pod-2.dump`, and `/backups/restoring` was empty afterwards.
+- [x] **2: holder-only release.** `release_lock` deletes the lock only when `data.job` names this run, in both `restore.sh` and `deploy.sh`. An unreadable holder means the lock is not released. Cases: holder changed (restore and deploy); holder unreadable.
+- [x] **3: deploy takes the lock.** `deploy.sh` takes `issue-tracker-restore-lock` after its active-Job checks, and refuses if it is held. It releases the lock on every exit (`on_failure`, the rollout-phase trap, INT/TERM), but keeps it while `job_may_run=1`. That flag is set just before the backup Job, and cleared after the migrate Job completes or `on_failure` confirms both Jobs gone.
+  - Cases: lock held: refuses; create fails; released after success; released after a failure before the Jobs; released when the Jobs are confirmed gone; kept when they may still run.
+  - kind: the main deploy left no lock; "ok: deploy refused while the restore lock was held; lock left to its holder".
+- [x] **4:** `fail-closed.sh` checks for kubectl first and exits 2 with "needs kubectl". CI: "ok   fail-closed.sh without kubectl: exit 2, \"needs kubectl\"". The same check run against a copy with the check deleted reports it missing.
+- [x] **5:** the messages now say "revision unchanged (<rev>)" and "not proven that the revision is unchanged". The control case expects "revision unchanged (0004_x)".
+- [x] **Before/after:** against `b35e8fb`, 14 new or changed cases FAIL; the finished-pods control and the Job-side pin case pass there, as expected. After the fix, 67/67 pass. Mutations: 23 caught, 7 of them new (#1, #2 ×2, #3 ×3, #5), plus the missing-kubectl check and its mutant (#4).
+- [x] **CI 5/5** on `c7f24f1`: "fail-closed checks passed", "all mutations caught", "kind smoke passed".
+
+Residual: the holder check before the delete isn't atomic, since kubectl can't delete with a precondition. A lock removed by hand and re-taken in that window could still be deleted.
 
 ## Category Checklists
 
