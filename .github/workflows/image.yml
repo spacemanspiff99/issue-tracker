@@ -1,8 +1,9 @@
 name: Image
 
 # Builds deployment/Dockerfile and pushes ghcr.io/spacemanspiff99/issue-tracker:<sha>.
-# Called by k3s-pipeline.yml, which deploys the pushed digest so UAT and production run the
-# same bytes.
+# Called by k3s-pipeline.yml, which deploys the digest so UAT and production run the same
+# bytes. A SHA that is already pushed is never rebuilt: every run for one commit (e.g. the UAT
+# cutover rehearsal and the production cutover) gets the same digest.
 on:
   push:
     branches:
@@ -31,18 +32,31 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: echo "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Reuse an existing image for this SHA
+        id: existing
+        run: |
+          if manifest="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' 2> /dev/null)"; then
+            digest="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["digest"])' "$manifest")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "could not read digest for $IMAGE: $manifest" >&2; exit 1; }
+            echo "already pushed: $IMAGE@$digest; not rebuilding"
+            echo "image=ghcr.io/spacemanspiff99/issue-tracker@$digest" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build
+        if: steps.existing.outputs.image == ''
         run: |
           docker build -f deployment/Dockerfile \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
             -t "$IMAGE" .
       - name: Push
+        if: steps.existing.outputs.image == ''
         run: docker push "$IMAGE"
       - name: Record digest
         id: digest
+        env:
+          EXISTING: ${{ steps.existing.outputs.image }}
         run: |
-          ref="$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+          ref="${EXISTING:-$(docker inspect --format '{{index .RepoDigests 0}}' "$IMAGE")}"
           [[ "$ref" =~ ^ghcr\.io/spacemanspiff99/issue-tracker@sha256:[0-9a-f]{64}$ ]] || { echo "unexpected digest ref: $ref" >&2; exit 1; }
           echo "pushed $ref"
           echo "image=$ref" >> "$GITHUB_OUTPUT"

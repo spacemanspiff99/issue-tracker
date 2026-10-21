@@ -97,7 +97,7 @@ wait_job() {
 kubectl -n "$ns" get secret issue-tracker-db issue-tracker-app > /dev/null
 kubectl -n "$ns" get secret ghcr-pull > /dev/null 2>&1 || echo "warning: secret ghcr-pull missing in $ns; private GHCR pulls will fail" >&2
 
-# Never start while a previous backup or migration is still running.
+# Never start while a previous backup, migration or restore is still running.
 for job in issue-tracker-backup-predeploy issue-tracker-migrate; do
   active="$(kubectl -n "$ns" get job "$job" -o jsonpath='{.status.active}' 2> /dev/null || true)"
   if [ "${active:-0}" -ge 1 ]; then
@@ -105,10 +105,29 @@ for job in issue-tracker-backup-predeploy issue-tracker-migrate; do
     exit 1
   fi
 done
+restoring="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o jsonpath='{range .items[?(@.status.active)]}{.metadata.name} {end}')"
+if [ -n "$restoring" ]; then
+  echo "refusing: restore Job(s) still active in $ns: $restoring" >&2
+  exit 1
+fi
 
 # 1. Everything except the app Deployment/Service/Ingress (ConfigMap, Postgres, PVCs, CronJob).
 kubectl -n "$ns" apply -f "$tmp/app.yaml" -l 'app.kubernetes.io/component!=web'
 kubectl -n "$ns" rollout status statefulset/issue-tracker-postgres --timeout="${timeout}s"
+
+# Maintenance window: stop the app before the backup so no write lands after the dump, and so
+# the old code never runs against the migrated schema. If the backup or the migration fails,
+# the old app comes back (Alembic runs every revision in one transaction on Postgres, so a
+# failed migration leaves the schema as it was).
+old_replicas="$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}' 2> /dev/null || true)"
+if [ "${old_replicas:-0}" -ge 1 ]; then
+  trap 'echo "deploy failed before rollout; restoring the previous app (replicas=$old_replicas)" >&2
+        kubectl -n "$ns" scale deployment/issue-tracker --replicas="$old_replicas" || true
+        rm -rf "$tmp"' EXIT
+  kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
+  kubectl -n "$ns" wait --for=delete pod -l app.kubernetes.io/component=web --timeout="${timeout}s" || true
+  echo "maintenance: app scaled to 0 for backup + migrate"
+fi
 
 # 2. Pre-deploy backup. Job specs are immutable, so replace the previous run's Job.
 kubectl -n "$ns" delete job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found --wait=true
@@ -119,7 +138,9 @@ wait_job issue-tracker-backup-predeploy
 kubectl -n "$ns" apply -f "$tmp/jobs.yaml" -l app.kubernetes.io/component=migrate
 wait_job issue-tracker-migrate
 
-# 4. App rollout.
+# 4. App rollout (the manifest sets replicas back to 1). From here on the schema may be new,
+# so a failure no longer brings the old app back.
+trap 'rm -rf "$tmp"' EXIT
 kubectl -n "$ns" apply -f "$tmp/app.yaml"
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout="${timeout}s"
 

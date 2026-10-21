@@ -50,7 +50,15 @@ echo "== first deploy"
 echo "== redeploy same image (idempotent; Postgres pod and revision must not change)"
 pg_uid="$(kubectl -n "$ns" get pod issue-tracker-postgres-0 -o jsonpath='{.metadata.uid}')"
 pg_rev="$(kubectl -n "$ns" get statefulset issue-tracker-postgres -o jsonpath='{.status.currentRevision}')"
-"$here/deploy.sh" uat "$image" "$sha"
+app_pod="$(kubectl -n "$ns" get pod -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.uid}')"
+deploy_log="$(mktemp)"
+"$here/deploy.sh" uat "$image" "$sha" | tee "$deploy_log"
+# Maintenance window: the app was stopped for backup + migrate, so its pod is a new one.
+grep -q '^maintenance: app scaled to 0 for backup + migrate$' "$deploy_log"
+[ "$(kubectl -n "$ns" get pod -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.uid}')" != "$app_pod" ] \
+  || { echo "app pod survived the maintenance window" >&2; exit 1; }
+echo "ok: app was scaled to 0 for backup + migrate and came back"
+head_dump="$(grep -o '/backups/pre-migration/[^ ]*\.dump' "$deploy_log" | sed -n 1p)"
 [ "$(kubectl -n "$ns" get pod issue-tracker-postgres-0 -o jsonpath='{.metadata.uid}')" = "$pg_uid" ] \
   || { echo "Postgres pod was replaced by a no-op redeploy" >&2; exit 1; }
 sts="$(kubectl -n "$ns" get statefulset issue-tracker-postgres -o jsonpath='{.status.currentRevision} {.status.updateRevision}')"
@@ -75,7 +83,7 @@ echo "ok: migrate Job refused without backup"
 kubectl -n "$ns" delete job issue-tracker-migrate --wait=true
 
 echo "== deploy refuses while a migrate Job is active"
-kubectl -n "$ns" create job issue-tracker-migrate --image=postgres:16 -- sleep 300
+kubectl -n "$ns" create job issue-tracker-migrate --image=postgres:16.15 -- sleep 300
 kubectl -n "$ns" wait --for=jsonpath='{.status.active}'=1 job/issue-tracker-migrate --timeout=120s
 expect_fail "active migrate Job" "$here/deploy.sh" uat "$image" "$sha"
 kubectl -n "$ns" delete job issue-tracker-migrate --wait=true
@@ -93,7 +101,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: seed
-          image: postgres:16
+          image: postgres:16.15
           command:
             - sh
             - -euc
@@ -130,7 +138,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: count
-          image: postgres:16
+          image: postgres:16.15
           command:
             - sh
             - -euc
@@ -155,6 +163,26 @@ kubectl -n "$ns" logs job/count-backups | sed -n 1p
 echo "== storage"
 kubectl get pvc -n "$ns" -o custom-columns=NAME:.metadata.name,REQUEST:.spec.resources.requests.storage,CLASS:.spec.storageClassName,STATUS:.status.phase
 
+echo "== restore --require-empty passes on an EMPTY projects table (NB2)"
+[ "$(psql_pg 'select count(*) from projects')" = 0 ]
+CONFIRM="$ns" "$here/restore.sh" uat "$head_dump" --require-empty
+echo "ok: --require-empty passed with an empty projects table"
+
+echo "== restore --require-empty passes when projects is ABSENT (NB2)"
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
+kubectl -n "$ns" wait --for=delete pod -l app.kubernetes.io/component=web --timeout=120s || true
+psql_pg 'drop schema public cascade; create schema public' > /dev/null
+[ -z "$(psql_pg "select to_regclass('public.projects')")" ]
+CONFIRM="$ns" "$here/restore.sh" uat "$head_dump" --require-empty
+[ -n "$(psql_pg 'select version_num from alembic_version')" ]
+echo "ok: --require-empty passed with no projects table; schema restored at $(psql_pg 'select version_num from alembic_version')"
+
+echo "== every restore wrote a readable safety dump first (NB3)"
+"$here/backup-files.sh" uat list | tee "$deploy_log.list"
+safety_after="$(awk '/^\/backups\/pre-restore:/{f=1; next} /^$/{f=0} f && /\.dump$/{n++} END{print n+0}' "$deploy_log.list")"
+echo "pre-restore dumps: $safety_after"
+[ "$safety_after" -ge 2 ] || { echo "expected at least 2 pre-restore safety dumps" >&2; exit 1; }
+
 echo "== browser workflow suite"
 "$here/e2e.sh" "$ns"
 shots="$(find "${E2E_OUT:-artifacts/e2e-k8s}" -name '*.png' 2> /dev/null | wc -l)"
@@ -178,6 +206,26 @@ expect_fail "--require-empty on a database with projects" \
   env CONFIRM="$ns" "$here/restore.sh" uat /backups/imports/roundtrip.dump --require-empty
 [ "$(psql_pg 'select count(*) from projects')" = "$projects" ] || { echo "refused restore changed data" >&2; exit 1; }
 echo "ok: refused restore left $projects projects in place"
+
+echo "== deploy refuses while a restore Job is active (NB3)"
+kubectl -n "$ns" create job fake-restore --image=postgres:16.15 -- sleep 300
+kubectl -n "$ns" label job fake-restore app.kubernetes.io/component=restore
+kubectl -n "$ns" wait --for=jsonpath='{.status.active}'=1 job/fake-restore --timeout=120s
+expect_fail "active restore Job" "$here/deploy.sh" uat "$image" "$sha"
+expect_fail "second restore while one is active" env CONFIRM="$ns" "$here/restore.sh" uat /backups/imports/roundtrip.dump
+kubectl -n "$ns" delete job fake-restore --wait=true
+
+echo "== restore timeout: Job deleted, app left at 0, data unchanged (NB1)"
+expect_fail "restore that outlives its timeout" env CONFIRM="$ns" RESTORE_TEST_DELAY_SECONDS=600 \
+  RESTORE_TIMEOUT_SECONDS=60 "$here/restore.sh" uat /backups/imports/roundtrip.dump
+[ -z "$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o jsonpath='{range .items[?(@.status.active)]}{.metadata.name}{end}')" ] \
+  || { echo "timed-out restore Job still active" >&2; exit 1; }
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
+  || { echo "app was scaled up after a timed-out restore" >&2; exit 1; }
+[ "$(psql_pg 'select count(*) from projects')" = "$projects" ] || { echo "timed-out restore changed data" >&2; exit 1; }
+echo "ok: timed-out restore left the app at 0 and $projects projects in place"
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 
 echo "== restore (rollback path): drop schema + restore the pre-e2e daily dump in one transaction"
 psql_pg 'create table leftover_from_bad_migration (id int)' > /dev/null
