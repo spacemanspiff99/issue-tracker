@@ -129,7 +129,7 @@ wait_app_gone() {
 # including when another session holds a lock on alembic_version (fail closed: unknown).
 db_version() {
   kubectl -n "$ns" exec -i issue-tracker-postgres-0 -c postgres -- \
-    sh -c 'psql -X -q -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -' <<'SQL'
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -X -q -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -' <<'SQL'
 SET lock_timeout = '10s';
 SET statement_timeout = '20s';
 SELECT to_regclass('public.alembic_version') IS NOT NULL AS has_version \gset
@@ -138,6 +138,19 @@ SELECT string_agg(version_num, ',') FROM alembic_version;
 \endif
 SQL
 }
+# On a fresh volume the image's entrypoint first runs a temporary, socket-only server (before
+# CREATE DATABASE), so pod readiness alone is not enough: wait for the real server over TCP.
+db_deadline=$((SECONDS + timeout))
+until kubectl -n "$ns" exec issue-tracker-postgres-0 -c postgres -- \
+    sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -h 127.0.0.1 -X -q -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select 1"' > /dev/null 2>&1; do
+  if (( SECONDS >= db_deadline )); then
+    echo "Postgres did not accept TCP connections to its database within ${timeout}s" >&2
+    kubectl -n "$ns" logs issue-tracker-postgres-0 -c postgres --tail=30 >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
+echo "postgres: accepting connections"
 version_before="$(db_version)"
 echo "alembic_version before deploy: ${version_before:-(none)}"
 

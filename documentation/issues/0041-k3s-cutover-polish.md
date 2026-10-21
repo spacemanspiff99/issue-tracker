@@ -17,6 +17,7 @@ cheap items before the owner's first real cutover.
 
 ## Acceptance Criteria
 
+- [ ] **BLOCKER (from #22, seen in PR #14's k8s job, run 39554288587):** the first deploy into a fresh namespace raced Postgres's init. The image entrypoint runs a temporary socket-only server before `CREATE DATABASE`; the socket-based `pg_isready` probe passed, and `db_version` failed with `FATAL: database "issue_tracker" does not exist`. Fixed two ways: the readiness and liveness probes use TCP (`pg_isready -h 127.0.0.1`), and `deploy.sh` waits in a bounded loop for `psql -h 127.0.0.1 -c 'select 1'` before reading the version, failing with a clear message on timeout. Proven in kind by 3 extra first deploys, each into a deleted and recreated namespace and volume.
 - [ ] NB1: `restore.sh` no longer has `|| true` on the scale-to-0 or on the pod wait; only a missing Deployment is tolerated. Proven in kind: an app pod held by a finalizer aborts the restore before any restore Job (and so before any safety dump or restore) is created.
 - [ ] NB2: `k3s.md` "What a deploy does" step 3 says a GitHub cancel probably doesn't run the cleanup, that the safe outcome is the app at 0 with the migrate Job maybe still running, and points to "Found the app at 0 replicas".
 - [ ] NB3: both cutover restores in `k3s.md` (12b, 12c) use `--keep-app-down` and say the next deploy brings the app up.

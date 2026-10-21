@@ -53,13 +53,16 @@ volumeBindingMode: WaitForFirstConsumer
 YAML
 
 # Owner actions, with throwaway values.
-kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$ns" create secret generic issue-tracker-db \
-  --from-literal=POSTGRES_USER=issue_tracker --from-literal=POSTGRES_DB=issue_tracker \
-  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$ns" create secret generic issue-tracker-app \
-  --from-literal=APP_SECRET_KEY="$(openssl rand -hex 32)" \
-  --from-literal=ADMIN_INITIAL_PASSWORD=ci-e2e-password --dry-run=client -o yaml | kubectl apply -f -
+owner_setup() {
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$ns" create secret generic issue-tracker-db \
+    --from-literal=POSTGRES_USER=issue_tracker --from-literal=POSTGRES_DB=issue_tracker \
+    --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$ns" create secret generic issue-tracker-app \
+    --from-literal=APP_SECRET_KEY="$(openssl rand -hex 32)" \
+    --from-literal=ADMIN_INITIAL_PASSWORD=ci-e2e-password --dry-run=client -o yaml | kubectl apply -f -
+}
+owner_setup
 
 echo "== deploy refuses the wrong kubectl context"
 expect_fail "context mismatch" env EXPECTED_CONTEXT=issue-tracker-uat "$here/deploy.sh" uat "$image" "$sha"
@@ -354,4 +357,22 @@ kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 kubectl -n "$ns" exec deploy/issue-tracker -c app -- python -c \
   "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert d['database'] == 'ok', d; print(d)"
+echo "== first deploy into a FRESH namespace and volume, 3 times (Postgres init race)"
+# On a new volume the image's entrypoint runs a temporary socket-only server before CREATE
+# DATABASE; deploy.sh must wait for the real server over TCP instead of racing it.
+for i in 1 2 3; do
+  kubectl delete namespace "$ns" --wait=true --timeout=300s
+  for _ in $(seq 1 60); do
+    [ -z "$(kubectl get pv -o jsonpath="{range .items[?(@.spec.claimRef.namespace=='$ns')]}{.metadata.name}{end}")" ] && break
+    sleep 2
+  done
+  owner_setup
+  fresh_log="$(mktemp)"
+  "$here/deploy.sh" uat "$image" "$sha" > "$fresh_log" 2>&1 || { cat "$fresh_log"; echo "fresh deploy $i failed" >&2; exit 1; }
+  grep -E '^(postgres: accepting connections|alembic_version before deploy|health:)' "$fresh_log"
+  grep -q '^alembic_version before deploy: (none)$' "$fresh_log"
+  grep -q '"database":"ok"' "$fresh_log"
+  echo "ok: fresh deploy $i"
+done
+
 echo "kind smoke passed"
