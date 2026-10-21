@@ -1,6 +1,6 @@
 # Issue 0039: Harden The k3s Deploy And Restore Path Before The First Real-Cluster Run
 
-Status: in-progress
+Status: in-progress (PR #22, CI green on 87b13ec; awaiting independent review)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`, `IT-3`
 Sprint: Sprint 0007
@@ -19,16 +19,37 @@ owner's first real-cluster run.
 
 ## Acceptance Criteria
 
-- [ ] N1: `deploy-prod` itself fails unless `github.ref == refs/heads/main`, and does not rely only on the environment branch rule.
-- [ ] NB1: on timeout, `restore.sh` deletes the restore Job and leaves the app at 0 with a clear message. It never prints "unchanged" while the Job may still commit. Proven in kind.
-- [ ] NB2: `--require-empty` passes when `projects` is absent and when it is empty, and refuses when it has rows. All three branches are proven in kind.
-- [ ] NB3: the restore takes a safety `pg_dump` of the current DB before dropping the schema, and `deploy.sh` refuses while a `component=restore` Job is active. Proven in kind.
-- [ ] NB4: `k3s.md` keeps the kubeconfigs (0600 under `~/.kube/`) for the later steps that need them, and every step uses the same paths.
-- [ ] NB5: the production cutover (12c) is checked to use the same commit and digest as the UAT rehearsal (12b).
-- [ ] NB6: the write window between backup and rollout is closed or explained.
-- [ ] NB7: UAT deploys only from `main`, unless an explicit input is set.
-- [ ] NB8: every Postgres image in `deployment/k8s` is pinned to a minor version.
-- [ ] CI green on the PR.
+Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/39545103929 (head `87b13ec`), job `k8s`. File:line refs are as of that commit.
+
+- [x] **N1: `deploy-prod` fails unless the ref is `main`.**
+  - `k3s-pipeline.yml:128` refuses any other ref, in addition to the `prod` environment branch rule.
+  - `deployment/k8s/tests/pipeline-gates.py` case "prod: branch refused" passes in CI.
+- [x] **NB1: timed-out restore.**
+  - `restore.sh:105-111` deletes the Job (foreground, so an uncommitted transaction rolls back), leaves the app at 0 replicas, and says the database is either unchanged or fully restored. It never says "unchanged" on a timeout.
+  - kind (`kind-smoke.sh:218`) printed "restore timed out after 60s; Job … deleted; app left at 0 replicas" and "ok: timed-out restore left the app at 0 and 20 projects in place".
+- [x] **NB2: `--require-empty` handles an absent table.**
+  - The guard uses `EXECUTE` (`restore-job.sh:24-40`), so a missing `projects` table is never planned.
+  - Reproduced on local PG16: the old guard fails with `relation "public.projects" does not exist`; the new guard passes on an absent and an empty table and refuses on rows.
+  - kind (`kind-smoke.sh:166,171,…`) printed "passed with an empty projects table", "passed with no projects table; schema restored at 0004…", and "ERROR: projects has 20 row(s); refusing to overwrite", with the 20 projects left in place.
+- [x] **NB3: safety dump, and no deploy during a restore.**
+  - `restore-job.sh:11-19` writes and verifies `/backups/pre-restore/<ts>-<pod>.dump` before anything is dropped, keeps the newest 5, and the CronJob prunes the same way.
+  - `deploy.sh:108-112` refuses while a `component=restore` Job is active, and `restore.sh:36-37` refuses a second restore.
+  - kind printed "pre-restore dumps: 2", "refusing: restore Job(s) still active … fake-restore" and "refusing: another restore Job is active".
+- [x] **NB4: kubeconfigs kept for later steps.** `k3s.md:103-125` keeps them at `~/.kube/issue-tracker-{uat,prod}.yaml` (0600) on the admin machine. Steps 11 and 12, "Off-cluster copies" and "Restore" all use those paths, and the guide says how to revoke and rotate them.
+- [x] **NB5: cutover runs the rehearsal's commit and digest.**
+  - `image.yml:35-43` never rebuilds an already-pushed SHA, so one commit always has one digest.
+  - The new `expected_image` input is checked in both deploy jobs (`k3s-pipeline.yml:70,134`).
+  - Guide steps 12b and 12c record the rehearsal digest and pass it.
+  - Gate cases "expected_image differs: refuse" (UAT and prod) pass in CI.
+- [x] **NB6: write window closed.**
+  - `deploy.sh:118-131` scales the app to 0 for backup + migrate and scales the old app back up if either fails. That is safe because Alembic runs all revisions in one transaction (`migrations/env.py:39`).
+  - The reasoning is in `k3s.md` "Why the maintenance window".
+  - kind printed "maintenance: app scaled to 0 for backup + migrate" and "ok: app was scaled to 0 for backup + migrate and came back".
+- [x] **NB7: UAT deploys only from `main` by default.**
+  - `k3s-pipeline.yml:66` refuses a non-main ref unless `allow_non_main_uat: true`. `promote_prod` from a branch is refused even with that override.
+  - All 14 gate cases pass in CI (CI step "Pipeline ref and digest gates", `ci.yml:143`).
+- [x] **NB8: Postgres pinned.** Every Postgres image in `deployment/k8s` is `postgres:16.15` (16.15 is what the kind run reported). The CI step "Postgres images pinned to a minor version" (`ci.yml:145`) fails on an unpinned one.
+- [x] **CI green on the PR:** all 5 checks pass on `87b13ec`.
 
 ## Category Checklists
 
