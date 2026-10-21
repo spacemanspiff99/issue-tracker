@@ -1,6 +1,6 @@
 # k3s Deployment Guide (UAT And Production)
 
-UAT and production run on the home-lab k3s cluster (issue 0020; hardened before the first run in issue 0039). Docker Compose stays for local
+UAT and production run on the home-lab k3s cluster (issue 0020; hardened before the first run in issues 0039 and 0041). Docker Compose stays for local
 development only (`local-development.md`).
 
 | Environment | Namespace | Overlay | Default ingress host |
@@ -214,8 +214,11 @@ Run workflow on `main` with `promote_prod: false`. The run log should show:
 3. Run the pipeline on `main` again with `promote_prod: true` and `expected_image: <that digest>`.
 
 `promote_prod: true` without `expected_image` is refused. The second run reuses the image (an
-already-pushed SHA is never rebuilt), redeploys it to UAT, then promotes it. If `main` moved in
-between, the digest differs and both deploy jobs refuse; start again from step 1.
+already-pushed SHA is never rebuilt), redeploys it to UAT, then promotes it. If the digest
+differs, both deploy jobs refuse; start again from step 1. That happens when `main` moved in
+between, or when the tag in GHCR was deleted or overwritten since the first run. A push-to-main
+image build and a pipeline run for the same commit cannot race: both use the concurrency group
+`image-<sha>`, so the second waits for the first and reuses its digest.
 
 **11. First production deploy.** Run the pipeline with `promote_prod: true` and `expected_image`
 (as in step 10). `Deploy PRODUCTION
@@ -261,10 +264,12 @@ b. **Rehearse on UAT.** Copy the dump to the machine with the kubeconfigs, then:
 ```bash
 export KUBECONFIG=~/.kube/issue-tracker-uat.yaml
 deployment/k8s/backup-files.sh uat put ./to-k3s.dump to-k3s.dump
-CONFIRM=issue-tracker-uat deployment/k8s/restore.sh uat /backups/imports/to-k3s.dump
+CONFIRM=issue-tracker-uat deployment/k8s/restore.sh uat /backups/imports/to-k3s.dump --keep-app-down
 ```
 
-   Then run the pipeline on `main` with `promote_prod: false`. It must back up, migrate the restored
+   `--keep-app-down` leaves the UAT app at 0: the restored data may be at an older migration head
+   than the running image expects. Next, run the pipeline on `main` with `promote_prod: false`; that
+   deploy migrates the data and brings the app up. It must back up, migrate the restored
    data to head, pass `/health` and pass the browser suite. Check the projects and issues in the UAT
    UI. If the migrate Job fails, stop: fix the data or the migration in a new issue before going
    further. Nothing in production has changed.
@@ -278,15 +283,16 @@ c. **Production.** With the rehearsal green, and Compose still stopped:
 ```bash
 export KUBECONFIG=~/.kube/issue-tracker-prod.yaml
 deployment/k8s/backup-files.sh prod put ./to-k3s.dump to-k3s.dump
-CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dump --require-empty
+CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dump --require-empty --keep-app-down
 ```
 
    `--require-empty` makes the restore refuse unless the k3s production `projects` table is absent or
-   empty. Next, run the pipeline on `main` with `promote_prod: true` and
+   empty. `--keep-app-down` leaves the app at 0 until the next deploy migrates the data and brings
+   it up. Next, run the pipeline on `main` with `promote_prod: true` and
    `expected_image: <the rehearsal digest>`. Both deploy jobs refuse if this run would deploy any
-   other digest; that happens only if `main` moved since the rehearsal, because an
-   already-pushed SHA is never rebuilt. If it refuses, rehearse again on the new commit (step 12b)
-   rather than skipping the check. Production backs up the restored data and migrates it forward.
+   other digest. That happens if `main` moved since the rehearsal, or if the GHCR tag was deleted or
+   overwritten (an already-pushed SHA is otherwise never rebuilt). If it refuses, rehearse again
+   on the new commit (step 12b) rather than skipping the check. Production backs up the restored data and migrates it forward.
    Check projects and issues in the UI, then switch DNS and bookmarks. Leave the Compose stack
    stopped, not removed, until you are satisfied. (`local-pipeline.yml` has no production job
    since issue 0038, so nothing can deploy to `.8` again.)
@@ -300,13 +306,18 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    active.
 3. Applies everything except the app (ConfigMap, Postgres, PVCs, CronJob) and waits for Postgres.
    **Maintenance window:** it scales the app to 0 and waits for its pod to go; if the pod is still
-   there at the timeout, the deploy aborts before the backup. If anything fails before the
-   rollout (including a timeout or a cancelled run), it first deletes the backup and migrate Jobs
-   and waits until their pods are gone, so an unfinished migration can never commit. Then it
-   re-reads `alembic_version`:
+   there at the timeout, the deploy aborts before the backup. If a step fails or times out before
+   the rollout, it first deletes the backup and migrate Jobs and waits until their pods are gone.
+   With its client gone, an unfinished migration can never send `COMMIT`. Then it re-reads
+   `alembic_version`:
    - unchanged from before the deploy: the previous app is scaled back up
    - changed, unreadable (for example locked by another session), or Jobs not confirmed gone:
      **the app stays at 0** and the log says what to check (see "Found the app at 0 replicas")
+
+   **A cancelled run is different.** GitHub signals the step's shell and force-kills it about
+   10 seconds later, which is usually before the cleanup above can finish. Expect the app at 0,
+   with the migrate Job possibly still running, and follow "Found the app at 0 replicas". Don't
+   cancel a deploy that is past the backup unless it is stuck.
 4. Picks the backup path `/backups/pre-migration/<sha>-<ts>.dump` and runs
    `issue-tracker-backup-predeploy` to write exactly that file. The dump is verified with
    `pg_restore -l`, leftover `.partial` files are removed, and the newest 5 dumps are kept.
@@ -419,7 +430,8 @@ To restore a dump from outside the cluster, upload it first with
 
 ## Found the app at 0 replicas
 
-A failed deploy, a timed-out restore, or `restore.sh --keep-app-down` can leave the app at 0. The
+A failed or cancelled deploy, a timed-out restore, or `restore.sh --keep-app-down` can leave the
+app at 0. The
 script's last log lines say why. Before scaling up, check that the image and the schema match:
 
 ```bash

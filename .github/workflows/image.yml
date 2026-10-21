@@ -22,6 +22,11 @@ permissions:
 jobs:
   push:
     runs-on: ubuntu-latest
+    # One build per SHA at a time: a push-to-main build and a pipeline run for the same commit
+    # queue behind each other, so the second sees the pushed tag and reuses its digest.
+    concurrency:
+      group: image-${{ github.sha }}
+      cancel-in-progress: false
     outputs:
       image: ${{ steps.digest.outputs.image }}
     env:

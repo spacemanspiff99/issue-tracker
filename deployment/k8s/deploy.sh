@@ -115,6 +115,16 @@ fi
 kubectl -n "$ns" apply -f "$tmp/app.yaml" -l 'app.kubernetes.io/component!=web'
 kubectl -n "$ns" rollout status statefulset/issue-tracker-postgres --timeout="${timeout}s"
 
+# Wait until no app (component=web) pod exists; fail after $1 seconds. Unlike
+# `kubectl wait --for=delete -l`, an already-empty selector counts as success.
+wait_app_gone() {
+  local deadline=$((SECONDS + $1))
+  while [ -n "$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name)" ]; do
+    (( SECONDS < deadline )) || { echo "app pod still present after $1s" >&2; return 1; }
+    sleep 2
+  done
+}
+
 # alembic_version as one line ("" before the first migration). Non-zero exit on any error,
 # including when another session holds a lock on alembic_version (fail closed: unknown).
 db_version() {
@@ -171,7 +181,7 @@ if [ "${old_replicas:-0}" -ge 1 ]; then
   phase="maintenance window"
   kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
   # Abort before the backup if the old pod is still running.
-  kubectl -n "$ns" wait --for=delete pod -l app.kubernetes.io/component=web --timeout="${timeout}s"
+  wait_app_gone "$timeout"
   echo "maintenance: app scaled to 0 for backup + migrate"
 fi
 

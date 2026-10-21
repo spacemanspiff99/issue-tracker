@@ -45,10 +45,29 @@ active="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o js
 
 # Stop the in-cluster writer. stdio MCP clients open their own DB sessions (e.g. via kubectl
 # exec or a port-forward); the owner must close those first (documentation/guides/k3s.md).
-replicas="$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}' 2> /dev/null || echo 0)"
-[ "${replicas:-0}" -ge 1 ] || replicas=1
-kubectl -n "$ns" scale deployment/issue-tracker --replicas=0 2> /dev/null || true
-kubectl -n "$ns" wait --for=delete pod -l app.kubernetes.io/component=web --timeout=120s 2> /dev/null || true
+# Wait until no app (component=web) pod exists; fail after $1 seconds. Unlike
+# `kubectl wait --for=delete -l`, an already-empty selector counts as success.
+wait_app_gone() {
+  local deadline=$((SECONDS + $1))
+  while [ -n "$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name)" ]; do
+    (( SECONDS < deadline )) || { echo "app pod still present after $1s" >&2; return 1; }
+    sleep 2
+  done
+}
+
+# Only a missing Deployment is tolerated; any other error, or an app pod that won't stop,
+# aborts here, before the safety dump and the restore.
+has_app=0
+replicas="$(kubectl -n "$ns" get deployment issue-tracker --ignore-not-found -o jsonpath='{.spec.replicas}')"
+if kubectl -n "$ns" get deployment issue-tracker --ignore-not-found -o name | grep -q .; then
+  has_app=1
+  [ "${replicas:-0}" -ge 1 ] || replicas=1
+  kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
+  wait_app_gone 120
+else
+  replicas=1
+  echo "no issue-tracker Deployment in $ns yet; nothing to stop"
+fi
 
 kubectl -n "$ns" create configmap issue-tracker-restore-script --from-file=restore-job.sh="$here/restore-job.sh" \
   --dry-run=client -o yaml | kubectl -n "$ns" apply -f - > /dev/null
@@ -123,7 +142,7 @@ if [ "$keep_down" = 1 ] && [ "$status" = ok ]; then
   echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas"
   exit 0
 fi
-kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
+[ "$has_app" = 1 ] && kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
 if [ "$status" = failed ]; then
   if grep -q '^restore committed$' <<< "$logs"; then
     echo "restore committed but the Job failed afterwards; inspect $job" >&2
@@ -132,5 +151,5 @@ if [ "$status" = failed ]; then
   fi
   exit 1
 fi
-kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+[ "$has_app" = 1 ] && kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 echo "restored $dump into $ns. If alembic_version is behind head, the next pipeline run backs up and migrates it forward."

@@ -227,6 +227,51 @@ kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 pvc_sh fix-backups 'rm /backups/pre-migration && mv /backups/pre-migration.saved /backups/pre-migration'
 echo "ok: failed backup -> no migration, old app back"
 
+echo "== migrate Job times out, Jobs deleted, version unchanged -> old app back (NB5)"
+# A memory quota that admits the backup pod (Postgres 256Mi + backup 64Mi) but not the migrate
+# pod (+128Mi), so the migration never starts and times out. alembic_version stays readable.
+version="$(psql_pg 'select version_num from alembic_version')"
+kubectl -n "$ns" apply -f - <<'YAML'
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: block-migrate}
+spec:
+  hard: {requests.memory: 320Mi}
+YAML
+for _ in $(seq 1 60); do
+  [ -n "$(kubectl -n "$ns" get resourcequota block-migrate -o jsonpath='{.status.used.requests\.memory}')" ] && break
+  sleep 1
+done
+nb5_log="$(mktemp)"
+if DEPLOY_TIMEOUT_SECONDS=60 "$here/deploy.sh" uat "$image" "$sha" > "$nb5_log" 2>&1; then
+  cat "$nb5_log"; kubectl -n "$ns" delete resourcequota block-migrate
+  echo "deploy succeeded although the migrate pod was blocked" >&2; exit 1
+fi
+cat "$nb5_log"
+kubectl -n "$ns" delete resourcequota block-migrate
+grep -q '^deploy failed during: migrate$' "$nb5_log"
+grep -q "job issue-tracker-backup-predeploy complete" "$nb5_log"
+grep -q 'Jobs deleted and alembic_version unchanged.*restoring the previous app (replicas=1)' "$nb5_log"
+[ -z "$(kubectl -n "$ns" get job issue-tracker-migrate --ignore-not-found -o name)" ] || { echo "migrate Job survived" >&2; exit 1; }
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 1 ]
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+[ "$(psql_pg 'select version_num from alembic_version')" = "$version" ]
+echo "ok: migrate timed out -> Jobs deleted, alembic_version still $version, old app scaled back up"
+
+echo "== restore aborts before the safety dump when the app can't be stopped (NB1)"
+# An app pod that ignores deletion: a finalizer keeps it Terminating past the 120s wait.
+app_pod="$(kubectl -n "$ns" get pod -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.name}')"
+kubectl -n "$ns" patch pod "$app_pod" --type=merge -p '{"metadata":{"finalizers":["example.com/hold"]}}'
+safety_before="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o name | wc -l)"
+expect_fail "restore while the app pod won't stop" env CONFIRM="$ns" "$here/restore.sh" uat "$head_dump"
+[ "$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o name | wc -l)" = "$safety_before" ] \
+  || { echo "restore Job started although the app did not stop" >&2; exit 1; }
+kubectl -n "$ns" patch pod "$app_pod" --type=merge -p '{"metadata":{"finalizers":null}}'
+kubectl -n "$ns" wait --for=delete "pod/$app_pod" --timeout=120s
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+echo "ok: restore aborted before any restore Job when the app pod would not stop"
+
 echo "== storage"
 kubectl get pvc -n "$ns" -o custom-columns=NAME:.metadata.name,REQUEST:.spec.resources.requests.storage,CLASS:.spec.storageClassName,STATUS:.status.phase
 
