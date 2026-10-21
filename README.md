@@ -46,7 +46,8 @@ Current planning additions:
 - `documentation/planning/EXTERNAL_RULE_REVIEW.md` records the GitHub rule review and GPT-5.5 medium/high guidance changes.
 - `documentation/guides/manual-uat.md` is the browser and command checklist for local manual UAT.
 - `documentation/uat/TEMPLATE-local-uat.md` is the notes template for a UAT run.
-- `documentation/prompts/0016-production-readiness-orchestrator.md` drives Sprint 0007 to production on `192.168.10.8` with sub-sessions.
+- `documentation/guides/k3s.md` is the production path: k3s namespace `issue-tracker`, UAT `issue-tracker-uat`. The `192.168.10.8` Compose production path is retired.
+- `documentation/prompts/0016-production-readiness-orchestrator.md` is the historical Sprint 0007 orchestrator; its release half (`.8`) is superseded by k3s.
 - `documentation/sprints/0007-local-manual-uat-readiness.md` is the next sprint to get the MVP ready for local manual UAT.
 - `documentation/sprints/0035-subagent-local-uat-quality-iteration.md` decomposes the local UAT push into subagent-sized worker scopes.
 - `documentation/issues/0008-local-runtime-gate.md` through `documentation/issues/0012-uat-findings-and-release-decision.md` are the sprint issues.

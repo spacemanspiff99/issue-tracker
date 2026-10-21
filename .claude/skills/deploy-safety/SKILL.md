@@ -5,17 +5,21 @@ description: Use when editing `deployment/` (Dockerfile, compose files, `remote-
 
 # Deploy Safety (IT-6)
 
-## Facts (from `documentation/guides/deployment.md`, `.github/workflows/local-pipeline.yml`, Issue 0020)
+## Facts (from `documentation/guides/k3s.md`, `documentation/guides/deployment.md`, the workflows)
 
 - CI (`ci.yml`): ruff + pytest, Postgres `schema` job, Docker image build, compose `e2e` job.
   Runs on PRs and `main`.
 - **PRODUCTION = k3s namespace `issue-tracker`**; UAT = `issue-tracker-uat` (owner decision
-  2026-10-20). The self-hosted runner deploys with `kubectl`; image from GHCR. `deployment/k8s/`
-  and `k3s-pipeline.yml` are Issue 0020 and don't exist yet: until then there is **no supported
-  production deploy**.
-- **Retired:** Compose production on `192.168.10.8`. `local-pipeline.yml` still has its job
-  (`deploy-prod`, inputs `prod_host`/`promote_prod`, `environment: prod`, `needs: deploy-uat`,
-  refuses a SHA other than UAT's). Never dispatch with `promote_prod: true`; removal is Issue 0038.
+  2026-10-20). Procedure and owner steps: `documentation/guides/k3s.md`.
+- `k3s-pipeline.yml` (dispatch only, self-hosted runner): `image.yml` pushes `:<sha>` and outputs
+  the digest; UAT then prod deploy that digest via `deployment/k8s/deploy.sh <env> <image@sha256>
+  <sha>` (backup Job → migrate Job checking that exact dump → rollout → `/health`).
+  `deploy-prod` needs `promote_prod`, UAT success in the same run, and `environment: prod`
+  (reviewer, `main` only); each environment has its own `K3S_KUBECONFIG` secret.
+- `deployment/k8s/restore.sh` needs `CONFIRM=<namespace>`; `--require-empty` is for the first
+  cutover only. Restores and rollbacks follow `k3s.md` (never `alembic downgrade`).
+- **Retired:** Compose production on `192.168.10.8` (job removed in Issue 0038). Its data moves
+  to k3s once, via `k3s.md` step 12. `local-pipeline.yml` is dev verify + legacy Compose UAT only.
 - Compose hosts: dev `192.168.10.20`; legacy UAT `192.168.10.18` (replaced by k3s UAT for
   releases). User `akun`, path `/home/akun/issue-tracker`. Don't invent other hosts.
 - Cloud sessions run in Anthropic's cloud and cannot reach `192.168.10.x` or the cluster; LAN
