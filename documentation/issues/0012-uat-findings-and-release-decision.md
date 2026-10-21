@@ -34,6 +34,10 @@ Manual UAT needs a controlled closeout so defects become follow-up issues instea
 
 `IT-6` Deployment And Configuration Drift: Verify compose files, env vars, health checks, explicit migrations, and workflow behavior stay aligned.
 
+## UAT Runs
+
+- k3s `issue-tracker-uat` owner run sheet (two clean runs, seed, backup/restore/rollback drills, MCP, click-through, promotion exit criteria): [`../uat/2026-10-21-k3s-uat.md`](../uat/2026-10-21-k3s-uat.md)
+
 ## Verification Commands
 
 ```bash
