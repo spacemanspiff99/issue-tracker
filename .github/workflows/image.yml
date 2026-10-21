@@ -35,11 +35,19 @@ jobs:
       - name: Reuse an existing image for this SHA
         id: existing
         run: |
-          if manifest="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' 2> /dev/null)"; then
+          # Rebuild only when the tag is absent. Any other registry error fails the job, so a
+          # transient error can never give one commit a second digest.
+          if manifest="$(docker buildx imagetools inspect "$IMAGE" --format '{{json .Manifest}}' 2> "$RUNNER_TEMP/inspect.err")"; then
             digest="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["digest"])' "$manifest")"
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "could not read digest for $IMAGE: $manifest" >&2; exit 1; }
             echo "already pushed: $IMAGE@$digest; not rebuilding"
             echo "image=ghcr.io/spacemanspiff99/issue-tracker@$digest" >> "$GITHUB_OUTPUT"
+          elif grep -qiE 'not found|manifest unknown' "$RUNNER_TEMP/inspect.err"; then
+            echo "$IMAGE not pushed yet; building"
+          else
+            echo "registry error while checking $IMAGE; refusing to rebuild:" >&2
+            cat "$RUNNER_TEMP/inspect.err" >&2
+            exit 1
           fi
       - name: Build
         if: steps.existing.outputs.image == ''

@@ -5,14 +5,21 @@
 # ONE psql transaction with ON_ERROR_STOP: a failure rolls back to the database as it was, and
 # objects created by a bad migration do not survive a successful restore.
 #
-# Usage: CONFIRM=<namespace> deployment/k8s/restore.sh <uat|prod> </backups/...dump> [--require-empty]
+# Usage: CONFIRM=<namespace> deployment/k8s/restore.sh <uat|prod> </backups/...dump> [--require-empty] [--keep-app-down]
 #   --require-empty  refuse unless the projects table is absent or empty (first cutover only)
+#   --keep-app-down  leave the app at 0 replicas afterwards (rollback: set the old image first)
 set -euo pipefail
 
-env_name="${1:?usage: restore.sh <uat|prod> <dump-path> [--require-empty]}"
+env_name="${1:?usage: restore.sh <uat|prod> <dump-path> [--require-empty] [--keep-app-down]}"
 dump="${2:?dump path on the backup PVC required, e.g. /backups/pre-migration/<sha>-<ts>.dump}"
-require_empty=0
-[ "${3:-}" = --require-empty ] && require_empty=1
+require_empty=0 keep_down=0
+for flag in "${@:3}"; do
+  case "$flag" in
+    --require-empty) require_empty=1 ;;
+    --keep-app-down) keep_down=1 ;;
+    *) echo "unknown option: $flag" >&2; exit 2 ;;
+  esac
+done
 timeout="${RESTORE_TIMEOUT_SECONDS:-600}"
 test_delay="${RESTORE_TEST_DELAY_SECONDS:-0}"
 
@@ -110,6 +117,12 @@ if [ -z "$status" ]; then
   exit 1
 fi
 
+if [ "$keep_down" = 1 ] && [ "$status" = ok ]; then
+  echo "restored $dump into $ns; app left at 0 replicas (--keep-app-down)."
+  echo "Next: kubectl -n $ns set image deployment/issue-tracker app=<image that matches this schema>"
+  echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas"
+  exit 0
+fi
 kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
 if [ "$status" = failed ]; then
   if grep -q '^restore committed$' <<< "$logs"; then

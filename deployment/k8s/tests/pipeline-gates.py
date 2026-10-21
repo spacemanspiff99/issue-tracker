@@ -43,18 +43,19 @@ def prod(ref: str, uat_image: str, expected: str, image: str = DIGEST) -> bool:
 
 CASES = [
     ("uat: main", uat(MAIN, False, False, ""), True),
-    ("uat: main, promote", uat(MAIN, False, True, ""), True),
+    ("uat: main, promote without expected_image refused", uat(MAIN, False, True, ""), False),
+    ("uat: main, promote with expected_image", uat(MAIN, False, True, DIGEST), True),
     ("uat: branch refused", uat(BRANCH, False, False, ""), False),
     ("uat: branch with allow_non_main_uat", uat(BRANCH, True, False, ""), True),
-    ("uat: branch + promote refused even with allow", uat(BRANCH, True, True, ""), False),
-    ("uat: expected_image matches", uat(MAIN, False, True, DIGEST), True),
+    ("uat: branch + promote refused even with allow", uat(BRANCH, True, True, DIGEST), False),
+    ("uat: expected_image matches (UAT only)", uat(MAIN, False, False, DIGEST), True),
     ("uat: expected_image differs", uat(MAIN, False, True, OTHER), False),
-    ("prod: main, same digest", prod(MAIN, DIGEST, ""), True),
-    ("prod: branch refused", prod(BRANCH, DIGEST, ""), False),
-    ("prod: UAT ran another digest", prod(MAIN, OTHER, ""), False),
-    ("prod: no UAT digest", prod(MAIN, "", ""), False),
-    ("prod: tag instead of digest", prod(MAIN, "img:tag", "", image="img:tag"), False),
-    ("prod: expected_image matches", prod(MAIN, DIGEST, DIGEST), True),
+    ("prod: main, same digest, expected_image", prod(MAIN, DIGEST, DIGEST), True),
+    ("prod: no expected_image refused", prod(MAIN, DIGEST, ""), False),
+    ("prod: branch refused", prod(BRANCH, DIGEST, DIGEST), False),
+    ("prod: UAT ran another digest", prod(MAIN, OTHER, DIGEST), False),
+    ("prod: no UAT digest", prod(MAIN, "", DIGEST), False),
+    ("prod: tag instead of digest", prod(MAIN, "img:tag", "img:tag", image="img:tag"), False),
     ("prod: expected_image differs", prod(MAIN, DIGEST, OTHER), False),
 ]
 

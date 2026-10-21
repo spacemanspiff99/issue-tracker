@@ -17,6 +17,26 @@ expect_fail() {  # expect_fail <description> <command...>
   if "$@"; then echo "FAIL: expected refusal: $d" >&2; exit 1; fi
   echo "ok: refused: $d"
 }
+pvc_sh() {  # pvc_sh <job-name> <script>: run a one-off script against the backup PVC
+  kubectl -n "$ns" apply -f - > /dev/null <<YAML
+apiVersion: batch/v1
+kind: Job
+metadata: {name: $1}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: sh
+          image: postgres:16.15
+          command: ["sh", "-euc", $(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$2")]
+          volumeMounts: [{name: backups, mountPath: /backups}]
+      volumes: [{name: backups, persistentVolumeClaim: {claimName: issue-tracker-backups}}]
+YAML
+  kubectl -n "$ns" wait --for=condition=complete "job/$1" --timeout=180s > /dev/null
+  kubectl -n "$ns" delete job "$1" --wait=true > /dev/null
+}
 psql_pg() {
   kubectl -n "$ns" exec issue-tracker-postgres-0 -- sh -c "psql -X -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""
 }
@@ -160,6 +180,53 @@ YAML
 kubectl -n "$ns" wait --for=condition=complete job/count-backups --timeout=180s
 kubectl -n "$ns" logs job/count-backups | sed -n 1p
 
+echo "== migrate Job outlives its timeout: Job deleted, app stays at 0 when the version is unknowable (B1)"
+# Simulates an ALTER waiting on a lock held by another session (e.g. a stdio MCP client): once
+# the backup has finished, hold ACCESS EXCLUSIVE on alembic_version so the migration blocks.
+# The same lock makes alembic_version unreadable, so deploy.sh must not bring the old app back.
+version="$(psql_pg 'select version_num from alembic_version')"
+kubectl -n "$ns" delete job issue-tracker-backup-predeploy --ignore-not-found --wait=true
+(
+  until [ "$(kubectl -n "$ns" get job issue-tracker-backup-predeploy -o jsonpath='{.status.succeeded}' 2> /dev/null)" = 1 ]; do
+    sleep 0.5
+  done
+  kubectl -n "$ns" exec issue-tracker-postgres-0 -c postgres -- sh -c \
+    'psql -X -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "BEGIN; LOCK TABLE alembic_version IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(900);"'
+) > /dev/null 2>&1 &
+locker=$!
+b1_log="$(mktemp)"
+if DEPLOY_TIMEOUT_SECONDS=60 "$here/deploy.sh" uat "$image" "$sha" > "$b1_log" 2>&1; then
+  cat "$b1_log"; echo "deploy succeeded although the migration was blocked" >&2; exit 1
+fi
+cat "$b1_log"
+grep -q '^deploy failed during: migrate$' "$b1_log"
+grep -q '^LEAVING THE APP AT 0' "$b1_log"
+[ -z "$(kubectl -n "$ns" get job issue-tracker-migrate --ignore-not-found -o name)" ] || { echo "migrate Job survived" >&2; exit 1; }
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
+  || { echo "old app came back while alembic_version was unknowable" >&2; exit 1; }
+psql_pg "select pg_terminate_backend(pid) from pg_stat_activity where query like '%pg_sleep(900)%' and pid <> pg_backend_pid()" > /dev/null
+kill "$locker" 2> /dev/null || true
+wait "$locker" 2> /dev/null || true
+# The owner's check from the message: version unchanged, so scaling the old app up is safe.
+[ "$(psql_pg 'select version_num from alembic_version')" = "$version" ]
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+echo "ok: blocked migration -> Job deleted, app left at 0, alembic_version still $version"
+
+echo "== backup fails: migrate never runs, old app back with a clear message (B1)"
+pvc_sh break-backups 'mv /backups/pre-migration /backups/pre-migration.saved && touch /backups/pre-migration'
+b2_log="$(mktemp)"
+if "$here/deploy.sh" uat "$image" "$sha" > "$b2_log" 2>&1; then
+  cat "$b2_log"; echo "deploy succeeded although the backup failed" >&2; exit 1
+fi
+cat "$b2_log"
+grep -q '^deploy failed during: backup$' "$b2_log"
+grep -q 'Jobs deleted and alembic_version unchanged.*restoring the previous app' "$b2_log"
+! grep -q 'job.batch/issue-tracker-migrate created' "$b2_log" || { echo "migrate ran after a failed backup" >&2; exit 1; }
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+pvc_sh fix-backups 'rm /backups/pre-migration && mv /backups/pre-migration.saved /backups/pre-migration'
+echo "ok: failed backup -> no migration, old app back"
+
 echo "== storage"
 kubectl get pvc -n "$ns" -o custom-columns=NAME:.metadata.name,REQUEST:.spec.resources.requests.storage,CLASS:.spec.storageClassName,STATUS:.status.phase
 
@@ -229,12 +296,16 @@ kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 
 echo "== restore (rollback path): drop schema + restore the pre-e2e daily dump in one transaction"
 psql_pg 'create table leftover_from_bad_migration (id int)' > /dev/null
-CONFIRM="$ns" "$here/restore.sh" uat /backups/imports/roundtrip.dump
+CONFIRM="$ns" "$here/restore.sh" uat /backups/imports/roundtrip.dump --keep-app-down
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
+  || { echo "--keep-app-down scaled the app up" >&2; exit 1; }
+echo "ok: --keep-app-down left the app at 0"
 [ "$(psql_pg "select count(*) from information_schema.tables where table_name = 'leftover_from_bad_migration'")" = 0 ] \
   || { echo "object from the bad migration survived the restore" >&2; exit 1; }
 restored="$(psql_pg 'select count(*) from projects')"
 [ "$restored" -lt "$projects" ] || { echo "restore did not roll data back ($restored vs $projects)" >&2; exit 1; }
 echo "ok: restored to $restored projects (was $projects); leftover table gone"
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 kubectl -n "$ns" exec deploy/issue-tracker -c app -- python -c \
   "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert d['database'] == 'ok', d; print(d)"

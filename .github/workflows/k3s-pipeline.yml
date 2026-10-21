@@ -21,7 +21,7 @@ on:
         type: boolean
         default: false
       expected_image:
-        description: Optional ghcr.io/...@sha256 digest this run must deploy (cutover pins the UAT rehearsal's digest)
+        description: ghcr.io/...@sha256 digest this run must deploy; REQUIRED with promote_prod (the digest a UAT-only run verified)
         required: false
         default: ""
       allow_non_main_uat:
@@ -65,6 +65,9 @@ jobs:
             if [ "$PROMOTE" = true ]; then echo "refusing: promote_prod requires refs/heads/main, got $REF" >&2; exit 1; fi
             if [ "$ALLOW" != true ]; then echo "refusing: UAT deploys from main only (got $REF); set allow_non_main_uat to override" >&2; exit 1; fi
             echo "warning: UAT-only deploy from $REF (allow_non_main_uat)"
+          fi
+          if [ "$PROMOTE" = true ] && [ -z "$EXPECTED" ]; then
+            echo "refusing: promote_prod requires expected_image (the digest from a UAT-only run)" >&2; exit 1
           fi
           if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$IMAGE" ]; then
             echo "refusing: this run would deploy '$IMAGE', expected_image is '$EXPECTED'" >&2; exit 1
@@ -130,8 +133,8 @@ jobs:
             echo "Refusing production deploy: UAT ran '$UAT_IMAGE', production would run '$IMAGE'" >&2
             exit 1
           fi
-          if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$IMAGE" ]; then
-            echo "refusing: production would deploy '$IMAGE', expected_image is '$EXPECTED'" >&2; exit 1
+          if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$IMAGE" ]; then
+            echo "refusing: production would deploy '$IMAGE', expected_image is '${EXPECTED:-(empty)}'" >&2; exit 1
           fi
       - uses: actions/checkout@v4
       - name: Write production kubeconfig

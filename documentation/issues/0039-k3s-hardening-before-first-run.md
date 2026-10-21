@@ -1,6 +1,6 @@
 # Issue 0039: Harden The k3s Deploy And Restore Path Before The First Real-Cluster Run
 
-Status: in-progress (PR #22, CI green on 87b13ec; awaiting independent review)
+Status: in-progress (PR #22; second review round in progress)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`, `IT-3`
 Sprint: Sprint 0007
@@ -49,7 +49,15 @@ Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/3
   - `k3s-pipeline.yml:66` refuses a non-main ref unless `allow_non_main_uat: true`. `promote_prod` from a branch is refused even with that override.
   - All 14 gate cases pass in CI (CI step "Pipeline ref and digest gates", `ci.yml:143`).
 - [x] **NB8: Postgres pinned.** Every Postgres image in `deployment/k8s` is `postgres:16.15` (16.15 is what the kind run reported). The CI step "Postgres images pinned to a minor version" (`ci.yml:145`) fails on an unpinned one.
-- [x] **CI green on the PR:** all 5 checks pass on `87b13ec`.
+- [ ] **Review 2, B1:** a migrate or backup failure (timeout, cancel) deletes both Jobs (foreground, waits until their pods are gone) and brings the old app back only if `alembic_version` is provably unchanged. Otherwise the app stays at 0 with instructions. Proven in kind with a lock-blocked migration (stays at 0) and a failing backup (old app back).
+- [ ] **Review 2, N1:** `restore.sh --keep-app-down`. The guide's rollback order is restore, then set image, then scale up, and it says UAT must be restored too before a revert passes the UAT stage.
+- [ ] **Review 2, N2:** the image job fails on any `imagetools inspect` error other than "not found".
+- [ ] **Review 2, N3:** `promote_prod` requires `expected_image` (gate cases in CI).
+- [ ] **Review 2, N4:** a missing Deployment is detected with `--ignore-not-found`, so any other API error fails the deploy instead of skipping the maintenance window.
+- [ ] **Review 2, N5:** an old pod that is still running at the timeout aborts the deploy before the backup, and the guide has a "Found the app at 0 replicas" section.
+- [ ] **CI green on the final head.**
+
+Review 2's N6 and N7 are tracked in Issue 0040.
 
 ## Category Checklists
 

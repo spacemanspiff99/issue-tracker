@@ -207,10 +207,18 @@ Run workflow on `main` with `promote_prod: false`. The run log should show:
 - `health: {"ok": true, "database": "ok"}`, both in the pod and through the ingress
 - the browser suite passing, with screenshots in the `uat-e2e-screenshots-<sha>` artifact
 
-**10. Every release:** run the pipeline on `main`, with `promote_prod: false` for UAT only or
-`true` to continue into production.
+**10. Every release.** Production always takes an image that UAT has already verified:
+1. Run the pipeline on `main` with `promote_prod: false`. Copy the digest from the run (the
+   `image / push` log: `pushed ...@sha256:...` or `already pushed: ...`).
+2. Check UAT.
+3. Run the pipeline on `main` again with `promote_prod: true` and `expected_image: <that digest>`.
 
-**11. First production deploy.** Run the pipeline with `promote_prod: true`. `Deploy PRODUCTION
+`promote_prod: true` without `expected_image` is refused. The second run reuses the image (an
+already-pushed SHA is never rebuilt), redeploys it to UAT, then promotes it. If `main` moved in
+between, the digest differs and both deploy jobs refuse; start again from step 1.
+
+**11. First production deploy.** Run the pipeline with `promote_prod: true` and `expected_image`
+(as in step 10). `Deploy PRODUCTION
 (k3s)` runs only after `Deploy UAT (k3s)` succeeded in the same run (and so on the same commit). It
 deploys only the digest that UAT ran (checked against the live UAT Deployment), waits for the
 `prod` reviewer, and runs the same backup → migrate → rollout → `/health` sequence. The first run
@@ -290,8 +298,14 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    It warns if `ghcr-pull` is missing. It refuses if a backup, migrate or restore Job is still
    active.
 3. Applies everything except the app (ConfigMap, Postgres, PVCs, CronJob) and waits for Postgres.
-   **Maintenance window:** it scales the app to 0 and waits for its pod to go. If the backup or
-   the migration then fails, the previous app is scaled back up.
+   **Maintenance window:** it scales the app to 0 and waits for its pod to go; if the pod is still
+   there at the timeout, the deploy aborts before the backup. If anything fails before the
+   rollout (including a timeout or a cancelled run), it first deletes the backup and migrate Jobs
+   and waits until their pods are gone, so an unfinished migration can never commit. Then it
+   re-reads `alembic_version`:
+   - unchanged from before the deploy: the previous app is scaled back up
+   - changed, unreadable (for example locked by another session), or Jobs not confirmed gone:
+     **the app stays at 0** and the log says what to check (see "Found the app at 0 replicas")
 4. Picks the backup path `/backups/pre-migration/<sha>-<ts>.dump` and runs
    `issue-tracker-backup-predeploy` to write exactly that file. The dump is verified with
    `pg_restore -l`, leftover `.partial` files are removed, and the newest 5 dumps are kept.
@@ -402,6 +416,27 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/pre-migration/<sha
 To restore a dump from outside the cluster, upload it first with
 `backup-files.sh <env> put <file> <name>.dump`, then use `/backups/imports/<name>.dump`.
 
+## Found the app at 0 replicas
+
+A failed deploy, a timed-out restore, or `restore.sh --keep-app-down` can leave the app at 0. The
+script's last log lines say why. Before scaling up, check that the image and the schema match:
+
+```bash
+NS=issue-tracker   # or issue-tracker-uat
+kubectl -n $NS get deployment issue-tracker -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+kubectl -n $NS get jobs,pods                     # no issue-tracker-migrate / -restore-* pod still running
+kubectl -n $NS exec issue-tracker-postgres-0 -- sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select version_num from alembic_version" -c "select count(*) from projects"'
+```
+
+- **No Job running, version as before the deploy:** scale up:
+  `kubectl -n $NS scale deployment/issue-tracker --replicas=1`.
+- **Version is newer (the migration committed):** re-run the pipeline on the same commit to
+  finish the deploy, or roll back (below).
+- **A migrate or restore pod is still running or stuck:** look at its logs and at
+  `pg_stat_activity` for the session it waits on (often an MCP client). Close that session or
+  terminate it, let the Job finish or delete it, then check again.
+
 ## Rollback
 
 Never run `alembic downgrade`, and never delete a PVC or namespace to "reset".
@@ -410,10 +445,22 @@ Never run `alembic downgrade`, and never delete a PVC or namespace to "reset".
    `main`, so either `git revert` the bad commit on `main` and run the pipeline, or point the
    Deployment at the previous digest directly:
    `kubectl -n <ns> set image deployment/issue-tracker app=ghcr.io/spacemanspiff99/issue-tracker@<previous digest>`.
-2. **Schema changed:** the old image may not run on the new schema. Restore the
-   `pre-migration/<bad-sha>-<ts>.dump` taken just before the bad migration with `restore.sh`
-   (above), then roll the Deployment back to the previous image as in 1. Data written after that
-   dump is lost; copy it off first (`backup-files.sh get-latest`) if it matters.
+2. **Schema changed:** the new image must not start on the old schema, and the old image must not
+   start on the new one. Do it in this order (data written after the dump is lost, so copy it off
+   first with `backup-files.sh get-latest` if it matters):
+
+   ```bash
+   CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/pre-migration/<bad-sha>-<ts>.dump --keep-app-down
+   kubectl -n issue-tracker set image deployment/issue-tracker app=ghcr.io/spacemanspiff99/issue-tracker@<previous digest>
+   kubectl -n issue-tracker scale deployment/issue-tracker --replicas=1
+   kubectl -n issue-tracker rollout status deployment/issue-tracker
+   ```
+
+   **UAT has the bad revision too** (it ran first). Before a `git revert` on `main` can pass the
+   pipeline's UAT stage, restore UAT the same way from its own
+   `pre-migration/<bad-sha>-<ts>.dump`, using `restore.sh uat` with the UAT kubeconfig. Otherwise
+   the reverted code meets a database at a revision it doesn't know, and `alembic upgrade head`
+   fails.
 
 ## Verified in CI
 
@@ -438,4 +485,8 @@ The CI `k8s` job does the following:
   - `restore.sh` refusing without `CONFIRM`, with `--require-empty` on a non-empty database, and
     while another restore is active
   - a timed-out restore: Job deleted, app left at 0, data unchanged
+  - a migration blocked on a lock past its timeout: migrate Job deleted, app left at 0 because
+    `alembic_version` can't be read, version unchanged afterwards
+  - a failing backup: no migration, Jobs deleted, version unchanged, old app back
+  - `restore.sh --keep-app-down` leaving the app at 0
   - a full restore that removes a leftover table and returns `/health` ok
