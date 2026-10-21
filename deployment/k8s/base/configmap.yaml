@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: issue-tracker-config
+data:
+  # Overlays replace APP_BASE_URL with their ingress host.
+  APP_BASE_URL: http://issue-tracker.home.arpa
+  ADMIN_USERNAME: admin
+  # Plain-HTTP ingress by default. Set "true" only once the ingress terminates TLS.
+  SESSION_COOKIE_SECURE: "false"
+  MCP_ENABLED: "true"
+  LOG_LEVEL: INFO

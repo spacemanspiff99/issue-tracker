@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from issue_tracker.domain.enums import IssueStatus
+from issue_tracker.repositories.store import Repository
 from issue_tracker.services.tracker import CategoryService, DomainError, IssueService, ProjectService, SprintService
 
 
@@ -103,3 +104,25 @@ def test_categories_are_project_scoped_not_peer_taxonomy_constants(session):
             "- [ ] no leakage",
             category_id=first_category.id,
         )
+
+
+def test_adding_closed_issue_to_sprint_is_rejected_without_reopening(session):
+    project = ProjectService(session).create_project("Tracker")
+    issues = IssueService(session)
+    sprints = SprintService(session)
+    sprint = sprints.create_sprint(project.id, "MVP")
+    closed = issues.create_issue(project.id, "Closed", "- [ ] closed")
+    issues.update_status(closed.id, "done", originating_llm="gpt-5.5")
+    open_issue = issues.create_issue(project.id, "Open", "- [ ] open")
+
+    with pytest.raises(DomainError, match="Closed issue cannot be added to a sprint"):
+        sprints.add_issue(sprint.id, closed.id)
+    session.refresh(closed)
+    assert closed.status == IssueStatus.DONE
+    assert closed.closed_at is not None
+    assert [m.issue_id for m in Repository(session).list_sprint_issues(sprint.id)] == []
+
+    sprints.add_issue(sprint.id, open_issue.id)
+    session.refresh(open_issue)
+    assert open_issue.status == IssueStatus.IN_PROGRESS
+    assert [m.issue_id for m in Repository(session).list_sprint_issues(sprint.id)] == [open_issue.id]
