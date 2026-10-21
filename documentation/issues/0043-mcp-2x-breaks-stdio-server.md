@@ -1,4 +1,4 @@
-# Issue 0025: MCP Stdio Server Fails To Start With mcp 2.x
+# Issue 0043: MCP Stdio Server Fails To Start With mcp 2.x
 
 Status: backlog
 Recommended model: claude-opus-5-5 high

@@ -1,4 +1,4 @@
-# Issue 0026: MCP `project.list` Has No Limit
+# Issue 0044: MCP `project.list` Has No Limit
 
 Status: backlog
 Recommended model: claude-opus-5-5 medium

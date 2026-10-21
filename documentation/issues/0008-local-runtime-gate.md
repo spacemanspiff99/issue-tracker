@@ -39,7 +39,7 @@ Full table in [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md).
 - `RUN_BROWSER_UAT=1 pytest tests/e2e` against the stack → `22 passed`, 70 screenshots.
 - `git status` after the run: only intended source/doc files; `exports/` and `artifacts/` gitignored.
 - Originating model: claude-opus-5-5 (effort: low).
-- In-container `ruff check .` fails on cache permissions → [0027](0027-ruff-in-app-container-cache-permission.md) (`--no-cache` passes).
+- In-container `ruff check .` fails on cache permissions → [0045](0045-ruff-in-app-container-cache-permission.md) (`--no-cache` passes).
 
 ## Category Checklists
 

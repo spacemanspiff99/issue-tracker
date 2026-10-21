@@ -30,9 +30,9 @@ The web workflow is only half of the MVP. Manual UAT readiness also needs a loca
 - `--smoke` → `{"ok": true, "tools": [11 names]}`; `diff` against the list in `documentation/guides/mcp.md` is empty.
 - `pytest tests/integration/test_mcp_tools.py` → `3 passed`.
 - Live tool calls on the seeded demo project: `issue.search` default 449 B (5 compact keys, no AC), `limit=500` → effective limit 50; `issue.get` 115 B compact, AC only with `include_full=true` (265 B); `issue.create`/`update_status`/`sprint.create`/`sprint.add_issue` 77–177 B, ids + status (+ `next` hint on create), no AC body.
-- **Failure recorded:** the stdio server does not start on a fresh build (mcp 2.x removed `FastMCP`): stdout 0 lines, stderr `mcp package is required to run the stdio server`. With `mcp<2` in a throwaway container: stdout = 3 JSON-RPC lines, logs on stderr only. Smallest fix → [0025](0025-mcp-2x-breaks-stdio-server.md). `project.list` unbounded → [0026](0026-mcp-project-list-unbounded.md).
+- **Failure recorded:** the stdio server does not start on a fresh build (mcp 2.x removed `FastMCP`): stdout 0 lines, stderr `mcp package is required to run the stdio server`. With `mcp<2` in a throwaway container: stdout = 3 JSON-RPC lines, logs on stderr only. Smallest fix → [0043](0043-mcp-2x-breaks-stdio-server.md). `project.list` unbounded → [0044](0044-mcp-project-list-unbounded.md).
 - Stdio smoke script added to [`../guides/mcp.md#uat-smoke`](../guides/mcp.md#uat-smoke). Details: [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md).
-- Originating model: claude-opus-5-5 (effort: low). This issue's AC pass; the stdio blocker is carried by 0025 and blocks the 0012 release decision.
+- Originating model: claude-opus-5-5 (effort: low). This issue's AC pass; the stdio blocker is carried by 0043 and blocks the 0012 release decision.
 
 ## Category Checklists
 

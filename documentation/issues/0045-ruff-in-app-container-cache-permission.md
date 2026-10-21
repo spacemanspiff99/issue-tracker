@@ -1,4 +1,4 @@
-# Issue 0027: `ruff check` Fails Inside The App Container
+# Issue 0045: `ruff check` Fails Inside The App Container
 
 Status: backlog
 Recommended model: claude-opus-5-5 low

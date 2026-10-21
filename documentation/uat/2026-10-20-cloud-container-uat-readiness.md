@@ -30,7 +30,7 @@ Release decision stays with [0012](../issues/0012-uat-findings-and-release-decis
 | Compose config | `docker compose -f deployment/docker-compose.local.yml config -q` | Pass | exit 0 | |
 | Build | `docker compose -f deployment/docker-compose.local.yml build` | Pass (CI) / blocked here | CI `e2e` `up -d --build` on `c10970f`: [run](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39466799278/job/118780179039). Here: `failed to resolve ... python:3.12-slim: 429` then apt `403 Forbidden` for `deb.debian.org` | Environment network policy; app layers (pip install `-e .[dev]`) built fine. |
 | Migration | `... run --rm app alembic upgrade head` (fresh volume) | Pass | `0001_initial → 0002 → 0003 → 0004_reconcile_schema_drift` | |
-| Lint | `... run --rm app python -m ruff check .` | Fail (tooling) | `.ruff_cache` not writable by `appuser` | [0027](../issues/0027-ruff-in-app-container-cache-permission.md); `--no-cache`: `All checks passed!` |
+| Lint | `... run --rm app python -m ruff check .` | Fail (tooling) | `.ruff_cache` not writable by `appuser` | [0045](../issues/0045-ruff-in-app-container-cache-permission.md); `--no-cache`: `All checks passed!` |
 | Tests | `... run --rm app python -m pytest tests/` | Pass | `22 passed, 22 skipped` (skips = e2e without `RUN_BROWSER_UAT`) | |
 | Stack | `... up -d` | Pass | `app running`, `postgres running` | |
 | Health | `curl -fsS http://localhost:8000/health` | Pass | `{"ok":true,"database":"ok"}` | |
@@ -71,8 +71,8 @@ Release decision stays with [0012](../issues/0012-uat-findings-and-release-decis
 |---|---|---|---|---|
 | MCP smoke | `python -m issue_tracker.mcp.server --smoke` | Pass | `{"ok": true, "tools": [11 names]}`; equals `mcp.md` list (`diff` empty) | Static list only |
 | Compact output | `python -m pytest tests/integration/test_mcp_tools.py` | Pass | `3 passed` | |
-| Live tool calls (service layer, demo project 21) | scratch script calling `mcp/tools.py` | Pass | search default 449 B, `limit=2` 240 B, `limit=500` echoes effective limit 50 (service clamps to 1–50 in `IssueService.search`; only 26 issues existed, so the row cap was not exercised live, and no test asserts it yet — added to [0026](../issues/0026-mcp-project-list-unbounded.md)); `issue.get` compact 115 B / full 265 B; mutations 77–177 B; no `acceptance_criteria` outside `include_full` | `project.list` 1,508 B, unbounded → [0026](../issues/0026-mcp-project-list-unbounded.md) |
-| Stdio server | initialize + `tools/list` + `tools/call` over stdio | **Fail** | stdout 0 lines; stderr `mcp package is required to run the stdio server` (mcp 2.x installed) | [0025](../issues/0025-mcp-2x-breaks-stdio-server.md). With `mcp<2` in a throwaway container: 3 JSON-RPC lines on stdout, logs on stderr only |
+| Live tool calls (service layer, demo project 21) | scratch script calling `mcp/tools.py` | Pass | search default 449 B, `limit=2` 240 B, `limit=500` echoes effective limit 50 (service clamps to 1–50 in `IssueService.search`; only 26 issues existed, so the row cap was not exercised live, and no test asserts it yet — added to [0044](../issues/0044-mcp-project-list-unbounded.md)); `issue.get` compact 115 B / full 265 B; mutations 77–177 B; no `acceptance_criteria` outside `include_full` | `project.list` 1,508 B, unbounded → [0044](../issues/0044-mcp-project-list-unbounded.md) |
+| Stdio server | initialize + `tools/list` + `tools/call` over stdio | **Fail** | stdout 0 lines; stderr `mcp package is required to run the stdio server` (mcp 2.x installed) | [0043](../issues/0043-mcp-2x-breaks-stdio-server.md). With `mcp<2` in a throwaway container: 3 JSON-RPC lines on stdout, logs on stderr only |
 
 ## Import Export UAT
 
@@ -87,14 +87,14 @@ Release decision stays with [0012](../issues/0012-uat-findings-and-release-decis
 
 | Finding | Severity | Follow-up issue | Owner action | Status |
 |---|---|---|---|---|
-| MCP stdio server cannot start with mcp 2.x (`mcp>=1.2` unpinned) | High (agent-facing half of MVP unusable on fresh build) | [0025](../issues/0025-mcp-2x-breaks-stdio-server.md) | Approve the pin/port | Open |
-| `project.list` has no `limit` | Low | [0026](../issues/0026-mcp-project-list-unbounded.md) | — | Open |
-| In-container `ruff check` fails on cache dir permissions | Low (tooling) | [0027](../issues/0027-ruff-in-app-container-cache-permission.md) | — | Open |
+| MCP stdio server cannot start with mcp 2.x (`mcp>=1.2` unpinned) | High (agent-facing half of MVP unusable on fresh build) | [0043](../issues/0043-mcp-2x-breaks-stdio-server.md) | Approve the pin/port | Open |
+| `project.list` has no `limit` | Low | [0044](../issues/0044-mcp-project-list-unbounded.md) | — | Open |
+| In-container `ruff check` fails on cache dir permissions | Low (tooling) | [0045](../issues/0045-ruff-in-app-container-cache-permission.md) | — | Open |
 
 ## Decision
 
 Local manual UAT **not ready** as of `a98b164` — BLOCKED: MCP stdio server — fails to start on a
-fresh build ([0025](../issues/0025-mcp-2x-breaks-stdio-server.md)) — fix 0025, then re-run the
+fresh build ([0043](../issues/0043-mcp-2x-breaks-stdio-server.md)) — fix 0043, then re-run the
 stdio script. Also owed before "ready": a
 human click-through of `documentation/guides/manual-uat.md`. Web runtime, migrations, unit/integration
 tests, `/health`, and the full Playwright catalog passed on this SHA.
