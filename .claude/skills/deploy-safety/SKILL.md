@@ -13,11 +13,16 @@ description: Use when editing `deployment/` (Dockerfile, compose files, `remote-
   2026-10-20). Procedure and owner steps: `documentation/guides/k3s.md`.
 - `k3s-pipeline.yml` (dispatch only, self-hosted runner): `image.yml` pushes `:<sha>` and outputs
   the digest; UAT then prod deploy that digest via `deployment/k8s/deploy.sh <env> <image@sha256>
-  <sha>` (backup Job → migrate Job checking that exact dump → rollout → `/health`).
-  `deploy-prod` needs `promote_prod`, UAT success in the same run, and `environment: prod`
-  (reviewer, `main` only); each environment has its own `K3S_KUBECONFIG` secret.
-- `deployment/k8s/restore.sh` needs `CONFIRM=<namespace>`; `--require-empty` is for the first
-  cutover only. Restores and rollbacks follow `k3s.md` (never `alembic downgrade`).
+  <sha>`: app scaled to 0 (maintenance window) → backup Job → migrate Job checking that exact
+  dump → rollout → `/health`. On a failure before rollout it deletes the Jobs and brings the old
+  app back only if `alembic_version` is unchanged; otherwise it prints `LEAVING THE APP AT 0`
+  (recovery: `k3s.md` "Found the app at 0 replicas").
+  `deploy-prod` needs `promote_prod` + `expected_image` (the digest from a UAT-only run), UAT
+  success in the same run, `main`, and `environment: prod` (reviewer); each environment has its
+  own `K3S_KUBECONFIG` secret.
+- `deployment/k8s/restore.sh` needs `CONFIRM=<namespace>`, takes a safety dump first, and runs
+  all-or-nothing. `--require-empty` is for the first cutover only; `--keep-app-down` leaves the app
+  at 0 (rollback: set the old image before scaling up). Follow `k3s.md` (never `alembic downgrade`).
 - **Retired:** Compose production on `192.168.10.8` (job removed in Issue 0038). Its data moves
   to k3s once, via `k3s.md` step 12. `local-pipeline.yml` is dev verify + legacy Compose UAT only.
 - Compose hosts: dev `192.168.10.20`; legacy UAT `192.168.10.18` (replaced by k3s UAT for
