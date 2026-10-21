@@ -1,0 +1,159 @@
+name: k3s UAT Production Pipeline
+
+# Manual dispatch only. Deploy jobs run on the self-hosted runner. Each GitHub environment holds
+# its own kubeconfig secret (K3S_KUBECONFIG), scoped to that environment's namespace only, so
+# the production credential is released only after the `prod` environment's reviewer approves.
+# See documentation/guides/k3s.md.
+on:
+  workflow_dispatch:
+    inputs:
+      uat_url:
+        description: UAT ingress URL (checked for /health)
+        required: true
+        default: http://issue-tracker-uat.home.arpa
+      prod_url:
+        description: PRODUCTION ingress URL (checked for /health)
+        required: true
+        default: http://issue-tracker.home.arpa
+      promote_prod:
+        description: Deploy the same image digest to PRODUCTION (namespace issue-tracker) after UAT passes
+        required: true
+        type: boolean
+        default: false
+      expected_image:
+        description: ghcr.io/...@sha256 digest this run must deploy; REQUIRED with promote_prod (the digest a UAT-only run verified)
+        required: false
+        default: ""
+      allow_non_main_uat:
+        description: Allow a UAT-only deploy from a branch other than main (production always requires main)
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3s-uat-prod
+  cancel-in-progress: false
+
+jobs:
+  image:
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/image.yml
+
+  deploy-uat:
+    name: Deploy UAT (k3s)
+    needs: image
+    runs-on: [self-hosted, issue-tracker, local-dev]
+    environment: uat
+    outputs:
+      image: ${{ steps.deployed.outputs.image }}
+    env:
+      IMAGE: ${{ needs.image.outputs.image }}
+    steps:
+      - name: Require main (or an explicit UAT-only override) and the expected digest
+        env:
+          REF: ${{ github.ref }}
+          ALLOW: ${{ inputs.allow_non_main_uat }}
+          PROMOTE: ${{ inputs.promote_prod }}
+          EXPECTED: ${{ inputs.expected_image }}
+        run: |
+          if [ "$REF" != refs/heads/main ]; then
+            if [ "$PROMOTE" = true ]; then echo "refusing: promote_prod requires refs/heads/main, got $REF" >&2; exit 1; fi
+            if [ "$ALLOW" != true ]; then echo "refusing: UAT deploys from main only (got $REF); set allow_non_main_uat to override" >&2; exit 1; fi
+            echo "warning: UAT-only deploy from $REF (allow_non_main_uat)"
+          fi
+          if [ "$PROMOTE" = true ] && [ -z "$EXPECTED" ]; then
+            echo "refusing: promote_prod requires expected_image (the digest from a UAT-only run)" >&2; exit 1
+          fi
+          if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$IMAGE" ]; then
+            echo "refusing: this run would deploy '$IMAGE', expected_image is '$EXPECTED'" >&2; exit 1
+          fi
+      - uses: actions/checkout@v4
+      - name: Write UAT kubeconfig
+        env:
+          KCFG: ${{ secrets.K3S_KUBECONFIG }}
+        run: |
+          [ -n "$KCFG" ] || { echo "uat environment secret K3S_KUBECONFIG is empty" >&2; exit 1; }
+          [[ "$IMAGE" == *@sha256:* ]] || { echo "image job gave no digest: '$IMAGE'" >&2; exit 1; }
+          umask 077
+          printf '%s\n' "$KCFG" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Backup, migrate, roll out
+        run: bash deployment/k8s/deploy.sh uat "$IMAGE" "${{ github.sha }}"
+      - name: Ingress /health
+        env:
+          URL: ${{ inputs.uat_url }}
+        run: |
+          body="$(curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$URL/health")"
+          echo "$body"
+          python3 -c 'import json,sys; sys.exit(0 if json.loads(sys.argv[1]).get("database") == "ok" else 1)' "$body"
+      - name: Browser workflow suite
+        run: bash deployment/k8s/e2e.sh issue-tracker-uat
+      - name: Upload e2e screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uat-e2e-screenshots-${{ github.sha }}
+          path: artifacts/e2e-k8s/
+          if-no-files-found: warn
+      - name: Record deployed image
+        id: deployed
+        run: |
+          live="$(kubectl -n issue-tracker-uat get deployment issue-tracker -o jsonpath='{.spec.template.spec.containers[?(@.name=="app")].image}')"
+          [ "$live" = "$IMAGE" ] || { echo "UAT runs '$live', expected '$IMAGE'" >&2; exit 1; }
+          echo "image=$live" >> "$GITHUB_OUTPUT"
+      - name: Remove kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"
+
+  deploy-prod:
+    name: Deploy PRODUCTION (k3s)
+    needs: [image, deploy-uat]
+    # Runs only when asked, and only after UAT succeeded in this same run (so the same commit).
+    if: ${{ inputs.promote_prod && needs.deploy-uat.result == 'success' }}
+    runs-on: [self-hosted, issue-tracker, local-dev]
+    # Owner configures `prod` with a required reviewer and a main-only deployment branch rule.
+    environment: prod
+    env:
+      IMAGE: ${{ needs.image.outputs.image }}
+    steps:
+      - name: Require main, the digest UAT verified, and the expected digest
+        env:
+          REF: ${{ github.ref }}
+          UAT_IMAGE: ${{ needs.deploy-uat.outputs.image }}
+          EXPECTED: ${{ inputs.expected_image }}
+        run: |
+          # Enforced here as well as by the prod environment's branch rule.
+          [ "$REF" = refs/heads/main ] || { echo "refusing production deploy from $REF; main only" >&2; exit 1; }
+          if [ -z "$UAT_IMAGE" ] || [ "$UAT_IMAGE" != "$IMAGE" ] || [[ "$IMAGE" != *@sha256:* ]]; then
+            echo "Refusing production deploy: UAT ran '$UAT_IMAGE', production would run '$IMAGE'" >&2
+            exit 1
+          fi
+          if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$IMAGE" ]; then
+            echo "refusing: production would deploy '$IMAGE', expected_image is '${EXPECTED:-(empty)}'" >&2; exit 1
+          fi
+      - uses: actions/checkout@v4
+      - name: Write production kubeconfig
+        env:
+          KCFG: ${{ secrets.K3S_KUBECONFIG }}
+        run: |
+          [ -n "$KCFG" ] || { echo "prod environment secret K3S_KUBECONFIG is empty" >&2; exit 1; }
+          umask 077
+          printf '%s\n' "$KCFG" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
+      - name: Backup, migrate, roll out
+        run: bash deployment/k8s/deploy.sh prod "$IMAGE" "${{ github.sha }}"
+      - name: Ingress /health
+        env:
+          URL: ${{ inputs.prod_url }}
+        run: |
+          body="$(curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$URL/health")"
+          echo "$body"
+          python3 -c 'import json,sys; sys.exit(0 if json.loads(sys.argv[1]).get("database") == "ok" else 1)' "$body"
+      - name: Remove kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"

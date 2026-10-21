@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Long-lived resources. One-shot Jobs (pre-deploy backup, migration) live in ./jobs and are
+# applied by deployment/k8s/deploy.sh in order. Secrets are never rendered: the owner creates
+# them (see ../secrets/*.example.yaml and documentation/guides/k3s.md).
+resources:
+  - configmap.yaml
+  - postgres.yaml
+  - backup-pvc.yaml
+  - backup-cronjob.yaml
+  - app.yaml
+  - ingress.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: issue-tracker
+images:
+  - name: ghcr.io/spacemanspiff99/issue-tracker
+    newTag: set-by-deploy-script

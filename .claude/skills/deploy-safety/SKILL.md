@@ -1,31 +1,46 @@
 ---
 name: deploy-safety
-description: Use when editing `deployment/` (Dockerfile, compose files, `remote-compose-deploy.sh`), `.github/workflows/`, `.env.example` or config env vars, backup/restore docs, or before dispatching or discussing a deploy to dev, UAT, or production (192.168.10.8). Covers IT-6 (deployment and configuration drift), the approval gate, and backup-before-migrate.
+description: Use when editing `deployment/` (Dockerfile, compose files, `remote-compose-deploy.sh`), `.github/workflows/`, `.env.example` or config env vars, backup/restore docs, `deployment/k8s/`, or before dispatching or discussing a deploy to dev, UAT, or production (k3s `issue-tracker`). Covers IT-6 (deployment and configuration drift), the approval gate, and backup-before-migrate.
 ---
 
 # Deploy Safety (IT-6)
 
-## Facts (from `documentation/guides/deployment.md`, `.github/workflows/local-pipeline.yml`)
+## Facts (from `documentation/guides/k3s.md`, `documentation/guides/deployment.md`, the workflows)
 
-- CI (`ci.yml`): ruff + pytest on host Python 3.12, and a Docker image build. Runs on PRs and `main`.
-- Hosts: dev `192.168.10.20`, UAT `192.168.10.18`, **PRODUCTION `192.168.10.8`** (home-lab
-  prod; holds the real tracker data). User `akun`, path `/home/akun/issue-tracker`. Don't invent
-  other hosts.
-- `local-pipeline.yml` (manual dispatch, self-hosted runner) mislabels `.8` as "downstream dev"
-  (`dev_host`, `promote_dev`, `environment: dev`). Treat that job as a **production deploy**.
-- Cloud sessions run in Anthropic's cloud and cannot reach `192.168.10.x`; LAN steps run on the
-  self-hosted runner or by the owner.
-- `remote-compose-deploy.sh` refuses unsafe `DEPLOY_PATH`, takes a `pg_dump` to
-  `backups/<sha>-<ts>/pre-migration.dump` unless `SKIP_DB_BACKUP=1`, runs `alembic upgrade head`,
-  then checks `/health`.
+- CI (`ci.yml`): ruff + pytest, Postgres `schema` job, Docker image build, compose `e2e` job.
+  Runs on PRs and `main`.
+- **PRODUCTION = k3s namespace `issue-tracker`**; UAT = `issue-tracker-uat` (owner decision
+  2026-10-20). Procedure and owner steps: `documentation/guides/k3s.md`.
+- `k3s-pipeline.yml` (dispatch only, self-hosted runner): `image.yml` pushes `:<sha>` and outputs
+  the digest; UAT then prod deploy that digest via `deployment/k8s/deploy.sh <env> <image@sha256>
+  <sha>`: app scaled to 0 (maintenance window) → backup Job → migrate Job checking that exact
+  dump → rollout → `/health`. On a failure before rollout it deletes the Jobs and brings the old
+  app back only if `alembic_version` is unchanged; otherwise it prints `LEAVING THE APP AT 0`
+  (recovery: `k3s.md` "Found the app at 0 replicas").
+  `deploy-prod` needs `promote_prod` + `expected_image` (the digest from a UAT-only run), UAT
+  success in the same run, `main`, and `environment: prod` (reviewer); each environment has its
+  own `K3S_KUBECONFIG` secret.
+- `deployment/k8s/restore.sh` needs `CONFIRM=<namespace>`, takes a safety dump first, and runs
+  all-or-nothing. `--require-empty` is for the first cutover only; `--keep-app-down` leaves the app
+  at 0 (rollback: set the old image before scaling up). Follow `k3s.md` (never `alembic downgrade`).
+- **Retired:** Compose production on `192.168.10.8` (job removed in Issue 0038). Its data moves
+  to k3s once, via `k3s.md` step 12. `local-pipeline.yml` is dev verify + legacy Compose UAT only.
+- Compose hosts: dev `192.168.10.20`; legacy UAT `192.168.10.18` (replaced by k3s UAT for
+  releases). User `akun`, path `/home/akun/issue-tracker`. Don't invent other hosts.
+- Cloud sessions run in Anthropic's cloud and cannot reach `192.168.10.x` or the cluster; LAN
+  and cluster steps run on the self-hosted runner or by the owner.
+- `remote-compose-deploy.sh` refuses unsafe `DEPLOY_PATH`, refuses `SKIP_DB_BACKUP=1` when
+  `DEPLOY_ENV` is `uat` or `prod` (exit 2), takes a `pg_dump` to
+  `backups/<sha>-<ts>/pre-migration.dump`, runs `alembic upgrade head`, then requires `/health`
+  to report `"database": "ok"`.
 - `mirror-rules.yml` (on `main`): copies `CLAUDE.md` + `.claude/` and Codex/Cursor files into
   `vibecoding/projects/issue-tracker/`.
 
 ## Gates
 
-- Dispatching `local-pipeline.yml`, SSHing to a host, or running a migration on a non-local DB
-  needs explicit user approval for that run. Production (`.8`) additionally needs UAT green on
-  the same SHA (`uat-gate`) first.
+- Dispatching any pipeline, SSHing to a host, running `kubectl` against the cluster, or
+  migrating a non-local DB needs explicit user approval for that run. Production (k3s
+  `issue-tracker`) additionally needs UAT (`issue-tracker-uat`) green on the same SHA first.
 - Never set `SKIP_DB_BACKUP=1` for UAT or production. No backup → no migration.
 - Releases run only `alembic upgrade head`. No downgrade, drop, reset, volume removal, or
   auto-restore.

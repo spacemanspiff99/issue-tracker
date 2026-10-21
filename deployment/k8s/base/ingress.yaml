@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: issue-tracker
+  labels:
+    app.kubernetes.io/name: issue-tracker
+    app.kubernetes.io/component: web
+spec:
+  # k3s ships Traefik as its default ingress controller.
+  ingressClassName: traefik
+  rules:
+    - host: issue-tracker.home.arpa
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: issue-tracker
+                port:
+                  name: http

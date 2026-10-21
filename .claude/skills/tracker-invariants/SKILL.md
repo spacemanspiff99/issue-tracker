@@ -12,6 +12,7 @@ description: Use when changing `services/tracker.py`, `repositories/store.py`, o
 | Issues + sprints share one per-project sequence; shown as `NNNN` | `repo.allocate_sequence`, `display_id` | `tests/unit/test_services.py` |
 | Status values `backlog`/`in-progress`/`done` (`IssueStatus`); order not enforced; done+closed is final | `IssueService.update_status` | unit |
 | Close requires `originating_llm`; sets `closed_at`, `closed_by`, `close_note` once | `update_status` | unit |
+| Done+closed issues cannot be added to a sprint (`DomainError`; web 400 inline, MCP raises; status untouched) | `SprintService.add_issue` | `test_adding_closed_issue_to_sprint_is_rejected_without_reopening` |
 | Dependencies: no self-edge, no duplicate, no cycle, same project | `IssueService.add_dependency`/`_path_exists` | unit |
 | AC required on create | `IssueService.create_issue` | unit |
 | Categories are project rows (issue's category must be same project); no peer taxonomy constants | `CategoryService` | `test_categories_are_project_scoped_not_peer_taxonomy_constants` |

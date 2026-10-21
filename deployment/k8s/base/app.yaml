@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: issue-tracker
+  labels:
+    app.kubernetes.io/name: issue-tracker
+    app.kubernetes.io/component: web
+spec:
+  selector:
+    app.kubernetes.io/name: issue-tracker
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: issue-tracker
+  labels:
+    app.kubernetes.io/name: issue-tracker
+    app.kubernetes.io/component: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: issue-tracker
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: issue-tracker
+        app.kubernetes.io/component: web
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      # The container never migrates on start: deploy.sh runs the backup Job, then the
+      # migration Job, and only then applies this Deployment.
+      containers:
+        - name: app
+          image: ghcr.io/spacemanspiff99/issue-tracker
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: issue-tracker-config
+            - secretRef:
+                name: issue-tracker-db
+            - secretRef:
+                name: issue-tracker-app
+          env:
+            - name: DATABASE_URL
+              value: postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@issue-tracker-postgres:5432/$(POSTGRES_DB)
+          readinessProbe:
+            # Ready only when /health reports "database": "ok".
+            exec:
+              command:
+                - python
+                - -c
+                - "import json,sys,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)); sys.exit(0 if d.get('database') == 'ok' else 1)"
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              memory: 512Mi

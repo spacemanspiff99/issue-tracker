@@ -1,6 +1,6 @@
 # Issue 0013: Reconcile Schema Drift Before Production Data
 
-Status: in review (PR open, not merged)
+Status: done (merged in #8, 2569db5)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-3`
 Sprint: Sprint 0007
@@ -39,6 +39,14 @@ Sprint: Sprint 0007
   `alembic current` stays `0003_guidance_audit_events`.
 - `TEST_DATABASE_URL=$PG/it_test python -m pytest -q tests` → 12 passed.
 - CI: new `schema` job (Postgres 16 service: upgrade head, drift check, pytest on Postgres).
+
+## Closing Evidence (2026-10-21)
+
+- Merged: `git log --oneline main` → `2569db5 0013: Reconcile schema drift with models + CI schema job (#8)`
+  (adds `migrations/versions/0004_reconcile_schema_drift.py` and the CI `schema` job; owner approved the drop).
+- CI on current `main` head `b6a0092` (run 39458603486): `schema` job success — "Migrate empty database",
+  "Drift check", "Test on Postgres" all green, so drift stays 0 in CI after 0014/0017/0019 merged.
+- Closed by claude-opus-5-5 (effort: medium) in the 0018 status sync; originating model not recorded in the commit.
 
 ## Category Checklists
 

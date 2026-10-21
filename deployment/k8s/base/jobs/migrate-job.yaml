@@ -1,0 +1,64 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: issue-tracker-migrate
+  labels:
+    app.kubernetes.io/name: issue-tracker
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 604800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: issue-tracker
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-pull
+      initContainers:
+        # No backup from this deploy, no migration.
+        - name: require-backup
+          image: postgres:16.15
+          env:
+            - name: BACKUP_FILE
+              value: unset
+          command:
+            - sh
+            - -euc
+            - |
+              f="$BACKUP_FILE"
+              if [ "$f" != unset ] && [ -s "$f" ] && pg_restore -l "$f" > /dev/null; then
+                echo "backup present: $f"
+                exit 0
+              fi
+              echo "refusing to migrate: pre-migration dump $f missing or unreadable" >&2
+              exit 1
+          volumeMounts:
+            - name: backups
+              mountPath: /backups
+              readOnly: true
+      containers:
+        - name: migrate
+          image: ghcr.io/spacemanspiff99/issue-tracker
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+          # Forward-only. Releases never run `alembic downgrade`.
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - secretRef:
+                name: issue-tracker-db
+          env:
+            - name: DATABASE_URL
+              value: postgresql+psycopg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@issue-tracker-postgres:5432/$(POSTGRES_DB)
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: issue-tracker-backups

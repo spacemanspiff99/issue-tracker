@@ -28,3 +28,6 @@ Run one-off commands:
 docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker export-json 1 exports/project-1.json
 docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker import-json exports/project-1.json Imported --category-map IT-1=IT-1
 ```
+
+Demo data for a dev rehearsal: `docker compose -f deployment/docker-compose.local.yml run --rm app issue-tracker seed-demo`.
+UAT itself runs on k3s `issue-tracker-uat`; see [`manual-uat.md`](manual-uat.md).

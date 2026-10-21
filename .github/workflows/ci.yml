@@ -103,3 +103,91 @@ jobs:
       - name: App logs
         if: failure()
         run: $COMPOSE logs app
+
+  k8s:
+    # deployment/k8s: render + strict schema validation, then the full deploy sequence on a
+    # disposable kind cluster (issue 0020). Never touches a real cluster.
+    runs-on: ubuntu-latest
+    env:
+      KIND_VERSION: v0.27.0
+      KUBECONFORM_VERSION: v0.6.7
+      IMAGE: ghcr.io/spacemanspiff99/issue-tracker:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kind and kubeconform
+        run: |
+          mkdir -p "$HOME/bin"
+          curl -fsSLo "$HOME/bin/kind" "https://github.com/kubernetes-sigs/kind/releases/download/$KIND_VERSION/kind-linux-amd64"
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/kubeconform-linux-amd64.tar.gz" | tar xz -C "$HOME/bin" kubeconform
+          chmod +x "$HOME/bin/kind" "$HOME/bin/kubeconform"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+      - name: Render and validate overlays
+        run: |
+          for overlay in uat uat/jobs prod prod/jobs; do
+            echo "== $overlay"
+            kubectl kustomize "deployment/k8s/overlays/$overlay" | kubeconform -strict -summary -
+          done
+      - name: Render deploys pinned by digest (no cluster)
+        run: |
+          digest="ghcr.io/spacemanspiff99/issue-tracker@sha256:$(printf 'a%.0s' $(seq 64))"
+          for env in uat prod; do
+            out="$RUNNER_TEMP/render-$env"
+            RENDER_ONLY_DIR="$out" bash deployment/k8s/deploy.sh "$env" "$digest" "${{ github.sha }}"
+            kubeconform -strict -summary "$out/app.yaml" "$out/jobs.yaml"
+            # Every app-image container is pinned to the digest, never a tag.
+            test "$(grep -ho 'image: ghcr.io.*' "$out"/*.yaml | sort -u)" = "image: $digest" \
+              || { grep -hn 'image: ghcr.io' "$out"/*.yaml; exit 1; }
+            # Backup and migrate share one exact backup path.
+            test "$(grep -A1 'name: BACKUP_FILE' "$out/jobs.yaml" | grep -o '/backups/[^ ]*' | sort -u | wc -l)" = 1
+          done
+      - name: Pipeline ref and digest gates
+        run: python3 -m pip install -q pyyaml && python3 deployment/k8s/tests/pipeline-gates.py
+      - name: Postgres images pinned to a minor version
+        run: |
+          if grep -rnE 'image: *postgres(:16)?( |$)|postgres:16([^.0-9]|$)' deployment/k8s; then
+            echo "unpinned postgres image in deployment/k8s" >&2; exit 1
+          fi
+      - name: deploy.sh and restore.sh fail closed at every decision point
+        run: bash deployment/k8s/tests/fail-closed.sh
+      - name: fail-closed.sh catches re-introduced fail-open patterns (mutations)
+        run: bash deployment/k8s/tests/fail-closed-mutations.sh
+      - name: deploy.sh refuses bad inputs
+        run: |
+          for args in "staging img:tag ${{ github.sha }}" "uat img-without-tag ${{ github.sha }}" "uat img:tag not-a-sha" "uat img@sha256:short ${{ github.sha }}"; do
+            if RENDER_ONLY_DIR="$RUNNER_TEMP/x" bash deployment/k8s/deploy.sh $args; then echo "accepted: $args" >&2; exit 1; fi
+          done
+      - name: No secret values in deployment/k8s
+        run: |
+          # Secret manifests exist only as *.example.yaml with placeholder values.
+          if git ls-files deployment/k8s | grep -i secret | grep -v '\.example\.yaml$'; then
+            echo "secret manifest without .example.yaml suffix" >&2; exit 1
+          fi
+          if git grep -nE '^kind: Secret' -- deployment/k8s ':!*.example.yaml'; then
+            echo "Secret resource outside *.example.yaml" >&2; exit 1
+          fi
+          if git grep -nIE '(PASSWORD|SECRET_KEY|TOKEN|auth)["'"'"']?: *["'"'"']?[A-Za-z0-9+/=_-]{8,}' -- deployment/k8s | grep -v 'REPLACE_WITH'; then
+            echo "possible secret value" >&2; exit 1
+          fi
+      - name: Build image
+        run: docker build -t "$IMAGE" -f deployment/Dockerfile .
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name it-ci --wait 180s
+          docker pull postgres:16.15
+          kind load docker-image --name it-ci "$IMAGE" postgres:16.15
+      - name: Deploy uat overlay (backup -> migrate -> rollout -> /health -> e2e)
+        run: bash deployment/k8s/tests/kind-smoke.sh "$IMAGE" "${{ github.sha }}"
+      - name: Upload e2e screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-e2e-screenshots
+          path: artifacts/e2e-k8s/
+          if-no-files-found: warn
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get all,pvc,jobs -A || true
+          kubectl -n issue-tracker-uat describe pods || true
+          kubectl -n issue-tracker-uat logs deploy/issue-tracker --all-containers || true
+          kubectl -n issue-tracker-uat logs statefulset/issue-tracker-postgres || true
