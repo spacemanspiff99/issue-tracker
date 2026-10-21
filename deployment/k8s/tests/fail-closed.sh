@@ -7,6 +7,7 @@
 # Usage: deployment/k8s/tests/fail-closed.sh   (needs a real kubectl on PATH for kustomize/set)
 #        FC_ONLY="<text>" runs only the matching cases (used by fail-closed-mutations.sh).
 set -euo pipefail
+command -v kubectl > /dev/null || { echo "fail-closed.sh needs kubectl on PATH (for kustomize and set env)" >&2; exit 2; }
 here="$(cd "$(dirname "$0")/.." && pwd)"
 real_kubectl="$(command -v kubectl)"
 work="$(mktemp -d)"
@@ -20,7 +21,9 @@ export STUB_LOG="$work/calls.log" REAL_KUBECTL="$real_kubectl"
 # Jobs report STUB_JOB_STATUS ("succeeded/failed", default "1/"), Job logs print STUB_LOGS, and
 # /health reports ok. STUB_RESTORE_ACTIVE_FROM=N: from the Nth "restore Jobs active?" read on,
 # another restore Job reports active (one started meanwhile). The restore lock ConfigMap can be
-# created once per case (STUB_LOCK_HELD=1: it already exists). STUB_RESTORE_PODS: "name phase" lines.
+# created once per case (STUB_LOCK_HELD=1: it already exists); its data.job reads back as the
+# creator's, or as STUB_LOCK_HOLDER (another run took it meanwhile). STUB_RESTORE_PODS: "name phase"
+# lines, returned from the STUB_RESTORE_PODS_FROM-th (default 1st) restore-pod list on.
 cat > "$work/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >> "$STUB_LOG"
@@ -53,8 +56,13 @@ case "$args" in
     if [ -n "${STUB_LOCK_HELD:-}" ] || [ -e "$STUB_LOG.lock" ]; then
       echo 'Error from server (AlreadyExists): configmaps "issue-tracker-restore-lock" already exists' >&2; exit 1
     fi
-    touch "$STUB_LOG.lock" ;;
-  *" get pods -l app.kubernetes.io/component=restore "*) [ -z "${STUB_RESTORE_PODS:-}" ] || printf '%s\n' "$STUB_RESTORE_PODS" ;;
+    [[ "$args" =~ --from-literal=job=([^ ]+) ]] && echo "${BASH_REMATCH[1]}" > "$STUB_LOG.lock" ;;
+  *" get configmap issue-tracker-restore-lock "*)
+    if [ -n "${STUB_LOCK_HOLDER:-}" ]; then echo "$STUB_LOCK_HOLDER"; else cat "$STUB_LOG.lock" 2> /dev/null || true; fi ;;
+  *" delete configmap issue-tracker-restore-lock "*) rm -f "$STUB_LOG.lock" ;;
+  *" get pods -l app.kubernetes.io/component=restore "*)
+    n=$(( $(cat "$STUB_LOG.pod-reads" 2> /dev/null || echo 0) + 1 )); echo "$n" > "$STUB_LOG.pod-reads"
+    [ -z "${STUB_RESTORE_PODS:-}" ] || [ "$n" -lt "${STUB_RESTORE_PODS_FROM:-1}" ] || printf '%s\n' "$STUB_RESTORE_PODS" ;;
   *" get pods "*) [ -z "${STUB_PODS:-}" ] || echo "$STUB_PODS" ;;
   *" get job "*"jsonpath={.status.succeeded}/{.status.failed}"*) echo "${STUB_JOB_STATUS:-1/}" ;;
   *" logs job/"*) printf '%s\n' "${STUB_LOGS:-}" ;;
@@ -90,7 +98,7 @@ run_case() {  # run_case <deploy|restore> <description> <STUB_FAIL entries or ->
   [ -z "${FC_ONLY:-}" ] || [[ "[$script] $desc" == *"$FC_ONLY"* ]] || return 0
   [[ "$opts" == *" always "* ]] && always=1
   [ "$fail" != - ] || stub_fail=""   # "-": fail nothing; the case is driven by STUB_* state
-  : > "$STUB_LOG"; rm -f "$STUB_LOG".failed "$STUB_LOG".seen* "$STUB_LOG".restore-reads "$STUB_LOG".lock
+  : > "$STUB_LOG"; rm -f "$STUB_LOG".failed "$STUB_LOG".seen* "$STUB_LOG".restore-reads "$STUB_LOG".lock "$STUB_LOG".pod-reads
   if [ "$script" = deploy ]; then
     STUB_FAIL="$stub_fail" STUB_FAIL_ALWAYS="$always" "$here/deploy.sh" uat ghcr.io/spacemanspiff99/issue-tracker:test "$sha" > "$out" 2>&1 && rc=0 || rc=$?
   else
@@ -200,7 +208,8 @@ STUB_JOB_STATUS=/1 STUB_PARTIAL_LOGS=1 STUB_LOGS="$failed_same" run_case restore
 STUB_JOB_STATUS=/ EXPECT_OUTPUT="could NOT be confirmed deleted" \
   run_case restore "timeout, Job delete fails" "delete job issue-tracker-restore-" "after-jobs no-scale-up"
 # Control: failed before COMMIT, readable logs, version unchanged, app at 1 -> back to 1.
-STUB_LOGS="$failed_same" STUB_JOB_STATUS=/1 run_case restore "Job failed before COMMIT (control)" - "after-jobs scale-back"
+STUB_LOGS="$failed_same" STUB_JOB_STATUS=/1 EXPECT_OUTPUT="revision unchanged (0004_x)" \
+  run_case restore "Job failed before COMMIT (control)" - "after-jobs scale-back"
 # B1 (round 3): the app was at 0 before the restore; a pre-COMMIT failure must leave it at 0,
 # with and without --keep-app-down. And --keep-app-down at 1 replica must also stay at 0.
 STUB_LOGS="$failed_same" STUB_REPLICAS=0 STUB_JOB_STATUS=/1 RESTORE_FLAGS=--keep-app-down run_case restore "app at 0, --keep-app-down, failed before COMMIT (B1)" - "after-jobs no-scale-up"
@@ -230,11 +239,17 @@ STUB_LOGS="$same" run_case restore "lock released after a successful restore (N-
 run_case restore "lock released when the app can't be stopped (N-1)" "scale deployment/issue-tracker --replicas=0" lock-released
 STUB_JOB_STATUS=/ EXPECT_OUTPUT="restore lock kept" \
   run_case restore "lock kept while the Job may still run (N-1)" "delete job issue-tracker-restore-" "after-jobs no-scale-up lock-kept"
-# N-2: restore.sh passes the names of restore pods still running to the Job (KEEP_PINS).
-STUB_LOGS="$same" STUB_RESTORE_PODS=$'issue-tracker-restore-1-live Running\nissue-tracker-restore-0-old Failed' \
-  EXPECT_LOG='KEEP_PINS, value: "issue-tracker-restore-1-live "' \
-  run_case restore "running restore pod's pin passed as KEEP_PINS (N-2)" - "after-jobs exit0"
-run_case restore "restore pods unreadable (N-2)" "get pods -l app.kubernetes.io/component=restore" lock-released
+# N-2 / 0048 #1: no restore pod may be live (one may hold a pin), checked before the lock and again
+# just before the Job. Pods that finished don't count.
+live_pods=$'issue-tracker-restore-1-live Running\nissue-tracker-restore-0-old Failed'
+STUB_RESTORE_PODS="$live_pods" EXPECT_OUTPUT="restore pod(s) still running" \
+  run_case restore "live restore pod without a Job: refuses before anything (0048 #1)" - lock-kept
+STUB_RESTORE_PODS="$live_pods" STUB_RESTORE_PODS_FROM=2 EXPECT_OUTPUT="restore pod(s) started" \
+  run_case restore "restore pod started meanwhile: refuses before the Job (0048 #1)" - "no-scale-up lock-released"
+STUB_LOGS="$same" STUB_RESTORE_PODS=$'issue-tracker-restore-0-old Succeeded\nissue-tracker-restore-0-older Failed' \
+  run_case restore "finished restore pods don't block (0048 #1)" - "after-jobs exit0"
+run_case restore "restore pods unreadable before the lock (N-2)" "get pods -l app.kubernetes.io/component=restore" lock-kept
+run_case restore "restore pods unreadable after the lock (N-2)" "2:get pods -l app.kubernetes.io/component=restore" lock-released
 # N-3: after a failure the app comes back only if the version re-read on the way out is unchanged.
 STUB_JOB_STATUS=/1 STUB_LOGS=$'alembic_version before restore: 0004_x\nalembic_version after failed restore: 0003_y' \
   EXPECT_OUTPUT="after the failure '0003_y'" run_case restore "failed, version changed: app left at 0 (N-3)" - "after-jobs no-scale-up"
@@ -245,6 +260,22 @@ dup2=$'alembic_version before restore: 0004_x\nalembic_version before restore: 0
 STUB_LOGS="$dup2" run_case restore "success, duplicate version lines: app left at 0 (N-4)" - "after-jobs no-scale-up"
 STUB_JOB_STATUS=/1 STUB_LOGS=$'alembic_version before restore: 0004_x\nalembic_version before restore: 0004_x\nalembic_version after failed restore: 0004_x\nalembic_version after failed restore: 0004_x' \
   run_case restore "failed, duplicate version lines: app left at 0 (N-4)" - "after-jobs no-scale-up"
+
+# 0048 #2: the lock is released only by its holder: if data.job names another run, leave it.
+STUB_LOGS="$same" STUB_LOCK_HOLDER=someone-else EXPECT_OUTPUT="not by this run" \
+  run_case restore "lock now held by another run: not released (0048 #2)" - "after-jobs exit0 lock-kept"
+STUB_LOGS="$same" run_case restore "lock holder unreadable: not released (0048 #2)" "get configmap issue-tracker-restore-lock" "after-jobs exit0 lock-kept"
+# 0048 #3: deploy.sh takes the same lock, and releases it like restore.sh does.
+STUB_LOCK_HELD=1 EXPECT_OUTPUT="could not take the restore lock" \
+  run_case deploy "deploy: lock held by a restore: refuses (0048 #3)" - lock-kept
+run_case deploy "deploy: lock create fails: refuses (0048 #3)" "create configmap issue-tracker-restore-lock" lock-kept
+run_case deploy "deploy: lock released after a successful deploy (0048 #3)" - "after-jobs exit0 lock-released"
+run_case deploy "deploy: lock released after a failure before the Jobs (0048 #3)" "rollout status statefulset/issue-tracker-postgres" lock-released
+run_case deploy "deploy: lock released when the Jobs are confirmed gone (0048 #3)" "$wait_backup" "after-backup scale-back lock-released"
+EXPECT_OUTPUT="restore lock kept" run_case deploy "deploy: lock kept when the Jobs may still run (0048 #3)" \
+  "$wait_backup|get job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found -o name" "after-backup no-scale-up lock-kept"
+STUB_LOCK_HOLDER=someone-else EXPECT_OUTPUT="not by this deploy" \
+  run_case deploy "deploy: lock now held by another run: not released (0048 #2)" - "after-jobs exit0 lock-kept"
 
 # restore-job.sh itself, against stub psql/pg_dump/pg_restore and a scratch /backups (BACKUPS_ROOT).
 mkdir -p "$work/pgbin"
@@ -274,13 +305,13 @@ run_job_case() {  # run_job_case <description> <ok|tx-fails>
   rm -rf "$root" "$work/pg"; mkdir -p "$root/daily" "$root/restoring" "$work/pg"
   echo dump > "$root/daily/x.dump"
   ln "$root/daily/x.dump" "$root/restoring/killed-pod.dump"
-  ln "$root/daily/x.dump" "$root/restoring/live-pod.dump"
+  ln "$root/daily/x.dump" "$root/restoring/other-pod.dump"
   echo 0004_x > "$work/pg/version"; echo 0003_y > "$work/pg/dump_version"
   PATH="$work/pgbin:$PATH" PG_STATE="$work/pg" PG_FAIL_TX="$([ "$mode" = tx-fails ] && echo 1)" \
-    BACKUPS_ROOT="$root" DUMP="$root/daily/x.dump" KEEP_PINS="live-pod" HOSTNAME=own-pod REQUIRE_EMPTY=0 \
+    BACKUPS_ROOT="$root" DUMP="$root/daily/x.dump" HOSTNAME=own-pod REQUIRE_EMPTY=0 \
     POSTGRES_USER=u POSTGRES_DB=d bash "$here/restore-job.sh" > "$out" 2>&1 && rc=0 || rc=$?
   [ ! -e "$root/restoring/killed-pod.dump" ] || why="leaked pin not removed"
-  [ -n "$why" ] || [ -e "$root/restoring/live-pod.dump" ] || why="removed the pin of a running restore pod"
+  [ -n "$why" ] || [ ! -e "$root/restoring/other-pod.dump" ] || why="leaked pin not removed (other-pod)"
   [ -n "$why" ] || [ ! -e "$root/restoring/own-pod.dump" ] || why="own pin left behind"
   grep -qx 'alembic_version before restore: 0004_x' "$out" || why="${why:-no before line}"
   if [ "$mode" = ok ]; then
@@ -297,7 +328,7 @@ run_job_case() {  # run_job_case <description> <ok|tx-fails>
     echo "ok   [job] $desc: rc=$rc"
   fi
 }
-run_job_case "leaked pin removed, running pod's pin kept (N-2)" ok
+run_job_case "every pin but its own removed (0048 #1)" ok
 run_job_case "failed transaction logs the version after the failure (N-3)" tx-fails
 
 if [ "$failures" -ne 0 ]; then

@@ -305,7 +305,8 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    kubectl context is `issue-tracker-<env>`.
 2. Preflight: the Secrets `issue-tracker-db` and `issue-tracker-app` exist (it never creates them).
    It warns if `ghcr-pull` is missing. It refuses if a backup, migrate or restore Job is still
-   active.
+   active, then takes the restore lock (see Restore) for the rest of the run, so no restore can
+   start during the deploy.
 3. Applies everything except the app (ConfigMap, Postgres, PVCs, CronJob) and waits for Postgres.
    **Maintenance window:** it scales the app to 0 and waits for its pod to go; if the pod is still
    there at the timeout, the deploy aborts before the backup. If a step fails or times out before
@@ -319,7 +320,9 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    **A cancelled run is different.** GitHub signals the step's shell and force-kills it about
    10 seconds later, which is usually before the cleanup above can finish. Expect the app at 0,
    with the migrate Job possibly still running, and follow "Found the app at 0 replicas". Don't
-   cancel a deploy that is past the backup unless it is stuck.
+   cancel a deploy that is past the backup unless it is stuck. A killed run may also leave the
+   restore lock behind; the next deploy or restore then refuses and says how to clear it (see
+   Restore).
 4. Picks the backup path `/backups/pre-migration/<sha>-<ts>.dump` and runs
    `issue-tracker-backup-predeploy` to write exactly that file. The dump is verified with
    `pg_restore -l`, leftover `.partial` files are removed, and the newest 5 dumps are kept.
@@ -402,21 +405,27 @@ keeps the pod and the PVC) and redeploy.
 
 `restore.sh` overwrites live data and runs only with `CONFIRM=<namespace>`. First close every MCP
 session that points at this database: the stdio MCP server opens its own DB connection and doesn't
-go through the web app. **Don't run a restore while a pipeline deploy is running** in the same
-namespace; wait for the run to finish (or check Actions) first. The script then:
-- refuses if a backup, migrate or another restore Job is active
-- takes the **restore lock**, the ConfigMap `issue-tracker-restore-lock` (an atomic create, so a
-  second `restore.sh` is refused), and releases it on exit. It keeps the lock if its Job may still
-  be running (an interrupted run, or a timed-out Job it could not delete) and says so. If a killed
-  `restore.sh` left the lock behind, check that no restore Job or pod is running
-  (`kubectl -n <ns> get jobs,pods -l app.kubernetes.io/component=restore`), then
+go through the web app. A restore can't start while a deploy runs (they share the restore lock
+below), but wait for a pipeline run to finish anyway, so you restore what you meant to. The script
+then:
+- refuses if a backup, migrate or another restore Job is active, or a restore pod is still running
+  without one
+- takes the **restore lock**, the ConfigMap `issue-tracker-restore-lock`. The create is atomic, so a
+  second `restore.sh`, or a `deploy.sh`, is refused while it is held, and `deploy.sh` takes the same
+  lock for its whole run. Each holder writes its name in `data.job` and releases the lock on exit
+  only if `data.job` still names it. It keeps the lock if its Jobs may still be running (an
+  interrupted run, a timed-out restore Job it could not delete, or backup/migrate Jobs a failed
+  deploy could not confirm gone) and says so. If a killed `restore.sh` or `deploy.sh` left the lock
+  behind, check that nothing is running (`kubectl -n <ns> get jobs,pods`) and who held it
+  (`kubectl -n <ns> get configmap issue-tracker-restore-lock -o jsonpath='{.data.job}'`), then
   `kubectl -n <ns> delete configmap issue-tracker-restore-lock`.
-- scales the app to zero, and checks again for an active restore Job just before it creates its own
+- scales the app to zero, and checks again for an active restore Job or a live restore pod just
+  before it creates its own
 - runs a Job (`restore-job.sh`) that:
   - logs `alembic_version` before the restore, and again after it (or after a failure)
-  - removes pins leaked in `/backups/restoring/` by restore Jobs that were killed, but never the pin
-    of a restore pod that is still running, then pins the dump with a hard link there, so no prune
-    can delete it mid-restore, and checks it with `pg_restore -l`
+  - removes every pin in `/backups/restoring/` but its own (leaked by restore Jobs that were
+    killed; no other restore pod can be live), then pins the dump with a hard link there, so no
+    prune can delete it mid-restore, and checks it with `pg_restore -l`
   - writes a **safety dump of the current database** to `/backups/pre-restore/<ts>-<pod>.dump`
     (after a successful restore the newest 5 are kept, never counting or deleting the dump that
     was just restored)
@@ -436,8 +445,8 @@ Outcomes:
   current image may not match the restored schema. The script exits non-zero and prints both
   versions; follow Rollback 2 (`set image` to an image that matches, then scale up), or run the
   pipeline, whose deploy migrates the restored data forward and brings the app up.
-- **Failed before `COMMIT`**, and the Job re-read the same `alembic_version` on its way out: the
-  database is unchanged and the app goes back to its previous replica count, or stays at 0 if it
+- **Failed before `COMMIT`**, and the Job re-read the same `alembic_version` on its way out
+  (the script prints "revision unchanged"): the app goes back to its previous replica count, or stays at 0 if it
   was at 0 or `--keep-app-down` was given. A changed or missing version leaves the app at 0.
 - **Failed, and the logs can't show whether it committed** (unreadable, or a version line missing or
   repeated): the app stays at 0; check as in "Found the app at 0 replicas".
