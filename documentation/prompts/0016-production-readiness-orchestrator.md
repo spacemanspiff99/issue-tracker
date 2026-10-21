@@ -1,5 +1,7 @@
 # Prompt 0016: Production Readiness Orchestrator (192.168.10.8)
 
+> Release phase superseded by `k3s-production-release.md` (production on k3s).
+
 Paste everything below the line into a fresh Claude Code cloud session on `spacemanspiff99/issue-tracker`
 (environment `Issue-dev-cloud`), model `claude-opus-5-5`, effort `low` (`/effort low`).
 
