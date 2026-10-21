@@ -1,11 +1,11 @@
 ---
 name: uat-gate
-description: Use before saying "ready for UAT", "release-ready", "done" on a sprint, or asking the owner to test; and when working sprint 0007/0008 or issues 0008–0012 (local manual UAT readiness). Covers the Local Manual UAT readiness gate and where evidence is recorded.
+description: Use before saying "ready for UAT", "release-ready", "done" on a sprint, or asking the owner to test; and when working sprint 0007/0035 or issues 0008–0012 (local manual UAT readiness). Covers the Local Manual UAT readiness gate and where evidence is recorded.
 ---
 
 # UAT Gate
 
-Current objective (sprints 0007/0008, status planned): make the MVP ready for local manual UAT.
+Current objective (sprints 0007/0035, status planned): make the MVP ready for local manual UAT.
 Issues: 0008 runtime gate → 0009 web UAT script → 0010 demo data/reset → 0011 MCP smoke →
 0012 findings + release decision. Read the issue you're on, not the whole sprint doc.
 
