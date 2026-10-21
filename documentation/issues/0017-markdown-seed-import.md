@@ -48,4 +48,6 @@ issue-tracker import-markdown --project issue-tracker --dry-run
 
 ## STOP
 
+Re-checked 2026-10-21 on `b6a0092` (the command is merged as #11): `issue-tracker import-markdown --project issue-tracker --dry-run` still prints `import-markdown: Sequence 0008 used by documentation/issues/0008-local-runtime-gate.md and documentation/sprints/0008-subagent-local-uat-quality-iteration.md`. Issue 0033 is still `backlog`, so the first two AC stay open and the status stays `in-progress`.
+
 Stop when every AC passes with evidence. Do not run against `192.168.10.8`; the production seed is an owner step in `documentation/guides/production-cutover.md`.

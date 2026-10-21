@@ -2,8 +2,9 @@
 
 Entry point: [`../CLAUDE.md`](../CLAUDE.md). Adapted from the weather-app three-layer design
 (mirrored in `spacemanspiff99/vibecoding` under `weather-app/claude-guidance/`), cut down for a
-small single-branch project: no Linear, no session tags, no branch-integration reviewer. Hosts:
-dev `.20` → UAT `.18` → production `192.168.10.8`.
+small single-branch project: no Linear, no session tags, no branch-integration reviewer. Targets:
+dev `.20` (Compose) → UAT k3s `issue-tracker-uat` → production k3s `issue-tracker`; the
+`192.168.10.8` Compose production path is retired.
 
 | Layer | Path | Loads |
 | --- | --- | --- |
