@@ -74,11 +74,8 @@ kubectl -n "$ns" create -f - <<YAML' \
   'job_may_run=0
 kubectl -n "$ns" create -f - <<YAML'
 mutate restore.sh "lock released after a successful restore (N-1)" \
-  'elif ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then' \
+  'elif [ -n "$holder" ] && ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then' \
   'elif false; then'
-mutate restore-job.sh "leaked pin removed, running pod's pin kept (N-2)" \
-  'if [[ " ${KEEP_PINS:-} " == *" $name "* ]]; then' \
-  'if false; then'
 mutate restore-job.sh "failed transaction logs the version after the failure (N-3)" \
   'echo "alembic_version after failed restore: $after"' \
   ':'
@@ -88,6 +85,48 @@ mutate restore.sh "failed, version changed: app left at 0 (N-3)" \
 mutate restore.sh "success, duplicate version lines: app left at 0 (N-4)" \
   'if [ "$(grep -c "^$1: " <<< "$logs" || true)" = 1 ]; then' \
   'if true; then'
+# Issue 0048.
+mutate restore.sh "live restore pod without a Job: refuses before anything (0048 #1)" \
+  "| awk '\$1 != \"\" && \$2 != \"Succeeded\" && \$2 != \"Failed\" {printf \"%s \", \$1}'" \
+  "| awk '{}'"
+mutate restore.sh "lock now held by another run: not released (0048 #2)" \
+  'elif [ -n "$holder" ] && [ "$holder" != "$job" ]; then' \
+  'elif false; then'
+mutate deploy.sh "deploy: lock now held by another run: not released (0048 #2)" \
+  'elif [ -n "$holder" ] && [ "$holder" != "$lock_holder" ]; then' \
+  'elif false; then'
+mutate deploy.sh "deploy: lock held by a restore: refuses (0048 #3)" \
+  'if ! kubectl -n "$ns" create configmap "$lock" --from-literal=job="$lock_holder" > /dev/null; then' \
+  'if ! { kubectl -n "$ns" create configmap "$lock" --from-literal=job="$lock_holder" > /dev/null || true; }; then'
+mutate deploy.sh "deploy: lock kept when the Jobs may still run (0048 #3)" \
+  '[ "$jobs_ok" != 1 ] || [ -n "$left" ] || job_may_run=0' \
+  'job_may_run=0'
+mutate deploy.sh "deploy: lock released after a successful deploy (0048 #3)" \
+  'elif [ -n "$holder" ] && ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then' \
+  'elif false; then'
+mutate restore.sh "Job failed before COMMIT (control)" \
+  'revision unchanged (${v_before}); app back to' \
+  'the database is unchanged; app back to'
+
+# 0048 #4: without kubectl, fail-closed.sh must stop with exit 2 and say why, not run any case
+# (and not report a failure that hides the real cause). Checked on the script and on a mutant.
+needs_kubectl() {  # needs_kubectl <fail-closed.sh>: 0 if it exits 2 with "needs kubectl"
+  local out rc
+  out="$(PATH=/nonexistent /bin/bash "$1" 2>&1)" && rc=0 || rc=$?
+  [ "$rc" = 2 ] && grep -q "needs kubectl" <<< "$out"
+}
+if needs_kubectl "$k8s/tests/fail-closed.sh"; then
+  echo "ok   fail-closed.sh without kubectl: exit 2, \"needs kubectl\""
+else
+  echo "BAD  fail-closed.sh without kubectl did not exit 2 with \"needs kubectl\""; bad=$((bad + 1))
+fi
+rm -rf "$work/k8s"; cp -r "$k8s" "$work/k8s"
+sed -i '/needs kubectl on PATH/d' "$work/k8s/tests/fail-closed.sh"
+if needs_kubectl "$work/k8s/tests/fail-closed.sh"; then
+  echo "BAD  the kubectl check still passes with the check removed"; bad=$((bad + 1))
+else
+  echo "ok   the kubectl check catches: check removed"
+fi
 
 if [ "$bad" -ne 0 ]; then
   echo "$bad mutation(s) not caught" >&2

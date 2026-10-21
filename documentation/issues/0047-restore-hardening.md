@@ -1,6 +1,6 @@
 # Issue 0047: restore.sh Hardening From The #27 Review
 
-Status: in-progress (PR #28, green on 1af5b52; awaiting review)
+Status: done (PR #28, merged as `b35e8fb`; review follow-ups in Issue 0048)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007

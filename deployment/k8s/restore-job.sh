@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs INSIDE the restore Job pod (restore.sh mounts it from a ConfigMap). Do not run by hand.
-# Env: DUMP, REQUIRE_EMPTY (0|1), KEEP_PINS, POSTGRES_USER, POSTGRES_DB, PGHOST, PGPASSWORD, and
+# Env: DUMP, REQUIRE_EMPTY (0|1), POSTGRES_USER, POSTGRES_DB, PGHOST, PGPASSWORD, and
 # RESTORE_TEST_DELAY_SECONDS (tests only: pause before the transaction).
 set -euo pipefail
 
@@ -39,14 +39,11 @@ trap on_exit EXIT
 # Pin the dump with a hard link outside the pruned folders, so no prune (the daily CronJob, the
 # backup Job, or this script) can remove it while it is being restored. Restore from the pin.
 # A killed restore Job leaks its pin (bash as PID 1 ignores SIGTERM, so a SIGKILL skips the EXIT
-# trap), and the hard link keeps that dump's space in use. Remove those, but never a pin of a
-# restore pod restore.sh saw still running (KEEP_PINS: pod names), nor this Job's own.
+# trap), and the hard link keeps that dump's space in use. restore.sh holds the restore lock and
+# refuses while any other restore pod is live, so every pin here but this Job's own is leaked.
 mkdir -p "$root/restoring"
 for p in "$root"/restoring/*.dump; do
-  [ -e "$p" ] || continue
-  name="$(basename "$p" .dump)"
-  [ "$p" != "$pin" ] || continue
-  if [[ " ${KEEP_PINS:-} " == *" $name "* ]]; then echo "keeping pin of running restore pod $name"; continue; fi
+  [ -e "$p" ] && [ "$p" != "$pin" ] || continue
   rm -fv "$p"
 done
 rm -f "$pin"

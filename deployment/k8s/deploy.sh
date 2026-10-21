@@ -112,6 +112,33 @@ if [ -n "$restoring" ]; then
   exit 1
 fi
 
+# The restore lock, shared with restore.sh: `kubectl create` of a fixed-name ConfigMap is atomic,
+# so a restore can't start during this deploy, nor this deploy during a restore. Released on exit,
+# only by its holder (data.job), and not while the backup or migrate Job may still be running.
+lock=issue-tracker-restore-lock
+lock_holder="deploy-${sha:0:12}-$(date -u +%Y%m%d%H%M%S)"
+if ! kubectl -n "$ns" create configmap "$lock" --from-literal=job="$lock_holder" > /dev/null; then
+  echo "refusing: could not take the restore lock (ConfigMap $lock in $ns): a restore or another deploy holds it, or the API failed." >&2
+  echo "If none is running (kubectl -n $ns get jobs,pods), a killed restore.sh or deploy.sh left it behind:" >&2
+  echo "kubectl -n $ns get configmap $lock -o jsonpath='{.data.job}'; kubectl -n $ns delete configmap $lock" >&2
+  exit 1
+fi
+job_may_run=0
+release_lock() {
+  local holder
+  if [ "$job_may_run" = 1 ]; then
+    echo "restore lock kept: the backup or migrate Job may still be running. When they are finished or gone: kubectl -n $ns delete configmap $lock" >&2
+  elif ! holder="$(kubectl -n "$ns" get configmap "$lock" --ignore-not-found -o jsonpath='{.data.job}')"; then
+    echo "could not read the restore lock, so it was not released; once nothing is running: kubectl -n $ns delete configmap $lock" >&2
+  elif [ -n "$holder" ] && [ "$holder" != "$lock_holder" ]; then
+    echo "the restore lock is now held by '$holder', not by this deploy ($lock_holder); leaving it" >&2
+  elif [ -n "$holder" ] && ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then
+    echo "could not release the restore lock; once nothing is running: kubectl -n $ns delete configmap $lock" >&2
+  fi
+}
+trap 'rm -rf "$tmp"; release_lock' EXIT
+trap 'exit 130' INT TERM
+
 # 1. Everything except the app Deployment/Service/Ingress (ConfigMap, Postgres, PVCs, CronJob).
 kubectl -n "$ns" apply -f "$tmp/app.yaml" -l 'app.kubernetes.io/component!=web'
 kubectl -n "$ns" rollout status statefulset/issue-tracker-postgres --timeout="${timeout}s"
@@ -181,6 +208,7 @@ on_failure() {
   # Each check below fails closed: an error reading Jobs or the version keeps the app at 0.
   left="$(kubectl -n "$ns" get job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found -o name 2>&1)" || jobs_ok=0
   now="$(db_version 2>&1)" || version_ok=0
+  [ "$jobs_ok" != 1 ] || [ -n "$left" ] || job_may_run=0
   if [ "${old_replicas:-0}" -lt 1 ]; then
     echo "the app was not running before this deploy; leaving it at 0" >&2
   elif [ "$jobs_ok" != 1 ] || [ -n "$left" ]; then
@@ -195,6 +223,7 @@ on_failure() {
     kubectl -n "$ns" scale deployment/issue-tracker --replicas="$old_replicas" >&2
   fi
   rm -rf "$tmp"
+  release_lock
   exit "$rc"
 }
 trap on_failure EXIT
@@ -214,6 +243,7 @@ fi
 # 2. Pre-deploy backup. Job specs are immutable, so replace the previous run's Job.
 phase="backup"
 kubectl -n "$ns" delete job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found --wait=true
+job_may_run=1
 kubectl -n "$ns" apply -f "$tmp/jobs.yaml" -l app.kubernetes.io/component=backup
 wait_job issue-tracker-backup-predeploy
 
@@ -221,11 +251,11 @@ wait_job issue-tracker-backup-predeploy
 phase="migrate"
 kubectl -n "$ns" apply -f "$tmp/jobs.yaml" -l app.kubernetes.io/component=migrate
 wait_job issue-tracker-migrate
+job_may_run=0
 
 # 4. App rollout (the manifest sets replicas back to 1). From here on the schema may be new,
 # so a failure no longer brings the old app back.
-trap - INT TERM
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"; release_lock' EXIT
 kubectl -n "$ns" apply -f "$tmp/app.yaml"
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout="${timeout}s"
 
