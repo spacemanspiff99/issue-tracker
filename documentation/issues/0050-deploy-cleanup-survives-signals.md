@@ -1,6 +1,6 @@
 # Issue 0050: deploy.sh Cleanup Survives A Second INT/TERM
 
-Status: in-progress
+Status: in-progress (PR #31, green on 8c9db81; awaiting review)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
@@ -18,14 +18,16 @@ old app not brought back, and the lock not released.
 
 ## Acceptance Criteria
 
-- [ ] `on_failure` ignores further INT/TERM while it runs, and still prints its summary, restores
+Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/39651046019 (head `8c9db81`, 5/5 green), job `k8s`.
+
+- [x] `on_failure` ignores further INT/TERM while it runs, and still prints its summary, restores
   the old app when safe, and releases the lock.
-- [ ] Every cleanup step stays bounded: the Job deletion keeps `--timeout=180s`; the Job read, the
+- [x] Every cleanup step stays bounded: the Job deletion keeps `--timeout=180s`; the Job read, the
   scale-back and the lock calls use `--request-timeout=30s`; the version read uses
   `--request-timeout=60s` on top of its `lock_timeout`/`statement_timeout`.
-- [ ] Cases (TERM+INT during the Job deletion and during the Job check) fail on `016bae6` and pass
-  after; reverting to `trap - INT TERM` is caught.
-- [ ] CI 5/5.
+- [x] Cases (TERM+INT during the Job deletion and during the Job check) fail on `016bae6` and pass
+  after; reverting to `trap - INT TERM` is caught. On `016bae6` both cases FAIL ("output lacks: restoring the previous app": the TERM killed the script mid-cleanup); after the fix the summary, scale-back and lock release all happen.
+- [x] CI 5/5 on `8c9db81`.
 
 ## Category Checklists
 
