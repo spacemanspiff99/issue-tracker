@@ -29,6 +29,13 @@ issue files named below, and sub-session reports — nothing else unless a revie
 - **Effort:** `medium` for lanes, `high` for anything in `deployment/`, migrations, the
   release decision, and reviews.
 
+## Issue numbers
+
+Parallel lanes that each compute "highest + 1" collide (it happened: three lanes all took 0035).
+You own the sequence: before launching a wave, reserve a block of 3 numbers per lane above the
+current highest on `main`, put it in that lane's prompt, and record the allocation in your
+checklist.
+
 ## Sub-session launch
 
 `create_session` with `source_url: https://github.com/spacemanspiff99/issue-tracker`,
@@ -39,8 +46,8 @@ Effort: [medium|high]. Read CLAUDE.md, then documentation/issues/[FILE]; load th
 names. Branch claude/[NNNN]-[slug] from main. Write scope: [PATHS] only. Meet every AC with
 evidence (command + result + SHA). Open a PR whose body is the AC table with that evidence; tick
 AC in the issue file in the same PR; drive CI green. New problems outside scope: write a new
-issue file (number = highest in documentation/issues + documentation/sprints + 1, re-check right
-before committing) and stop on it. Don't merge. Don't touch 192.168.10.x or the cluster.
+issue file numbered from your reserved range [NNNN-NNNN] (never compute "highest + 1": lanes run in
+parallel) and stop on it. Don't merge. Don't touch 192.168.10.x or the cluster.
 Final message: PR URL, AC table, blockers.
 ```
 
