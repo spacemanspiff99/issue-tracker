@@ -22,8 +22,8 @@ spec:
             - secretRef:
                 name: issue-tracker-db
           env:
-            # deploy.sh sets DEPLOY_SHA; the migration Job refuses to run without this dump.
-            - name: DEPLOY_SHA
+            # deploy.sh sets BACKUP_FILE; the migration Job refuses to run without exactly this dump.
+            - name: BACKUP_FILE
               value: unset
             - name: PGHOST
               value: issue-tracker-postgres
@@ -36,9 +36,11 @@ spec:
             - sh
             - -euc
             - |
-              test "$DEPLOY_SHA" != unset
+              f="$BACKUP_FILE"
+              case "$f" in /backups/pre-migration/*.dump) ;; *) echo "bad BACKUP_FILE: $f" >&2; exit 1 ;; esac
+              test ! -e "$f"
               mkdir -p /backups/pre-migration
-              f="/backups/pre-migration/${DEPLOY_SHA}-$(date -u +%Y%m%dT%H%M%SZ).dump"
+              rm -fv /backups/pre-migration/*.partial
               pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$f.partial"
               pg_restore -l "$f.partial" > /dev/null
               mv "$f.partial" "$f"

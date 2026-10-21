@@ -1,7 +1,9 @@
 name: k3s UAT Production Pipeline
 
-# Manual dispatch only. Runs on the self-hosted runner, which holds the owner-provisioned
-# kubeconfig for the home-lab k3s cluster (documentation/guides/k3s.md).
+# Manual dispatch only. Deploy jobs run on the self-hosted runner. Each GitHub environment holds
+# its own kubeconfig secret (K3S_KUBECONFIG), scoped to that environment's namespace only, so
+# the production credential is released only after the `prod` environment's reviewer approves.
+# See documentation/guides/k3s.md.
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +16,7 @@ on:
         required: true
         default: http://issue-tracker.home.arpa
       promote_prod:
-        description: Deploy the same SHA to PRODUCTION (namespace issue-tracker) after UAT passes
+        description: Deploy the same image digest to PRODUCTION (namespace issue-tracker) after UAT passes
         required: true
         type: boolean
         default: false
@@ -25,11 +27,6 @@ permissions:
 concurrency:
   group: k3s-uat-prod
   cancel-in-progress: false
-
-env:
-  IMAGE: ghcr.io/spacemanspiff99/issue-tracker:${{ github.sha }}
-  # Repository variable holding the kubeconfig path on the runner; empty uses ~/.kube/config.
-  KUBECONFIG: ${{ vars.K3S_KUBECONFIG }}
 
 jobs:
   image:
@@ -44,9 +41,20 @@ jobs:
     runs-on: [self-hosted, issue-tracker, local-dev]
     environment: uat
     outputs:
-      sha: ${{ steps.deployed.outputs.sha }}
+      image: ${{ steps.deployed.outputs.image }}
+    env:
+      IMAGE: ${{ needs.image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
+      - name: Write UAT kubeconfig
+        env:
+          KCFG: ${{ secrets.K3S_KUBECONFIG }}
+        run: |
+          [ -n "$KCFG" ] || { echo "uat environment secret K3S_KUBECONFIG is empty" >&2; exit 1; }
+          [[ "$IMAGE" == *@sha256:* ]] || { echo "image job gave no digest: '$IMAGE'" >&2; exit 1; }
+          umask 077
+          printf '%s\n' "$KCFG" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
       - name: Backup, migrate, roll out
         run: bash deployment/k8s/deploy.sh uat "$IMAGE" "${{ github.sha }}"
       - name: Ingress /health
@@ -65,28 +73,44 @@ jobs:
           name: uat-e2e-screenshots-${{ github.sha }}
           path: artifacts/e2e-k8s/
           if-no-files-found: warn
-      - name: Record UAT SHA
+      - name: Record deployed image
         id: deployed
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          live="$(kubectl -n issue-tracker-uat get deployment issue-tracker -o jsonpath='{.spec.template.spec.containers[?(@.name=="app")].image}')"
+          [ "$live" = "$IMAGE" ] || { echo "UAT runs '$live', expected '$IMAGE'" >&2; exit 1; }
+          echo "image=$live" >> "$GITHUB_OUTPUT"
+      - name: Remove kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"
 
   deploy-prod:
     name: Deploy PRODUCTION (k3s)
-    needs: deploy-uat
+    needs: [image, deploy-uat]
+    # Runs only when asked, and only after UAT succeeded in this same run (so the same commit).
     if: ${{ inputs.promote_prod && needs.deploy-uat.result == 'success' }}
     runs-on: [self-hosted, issue-tracker, local-dev]
-    # Owner configures the `prod` environment in GitHub with a required reviewer.
+    # Owner configures `prod` with a required reviewer and a main-only deployment branch rule.
     environment: prod
+    env:
+      IMAGE: ${{ needs.image.outputs.image }}
     steps:
       - uses: actions/checkout@v4
-      - name: Require UAT green on this SHA
+      - name: Require the image digest UAT verified
         env:
-          UAT_SHA: ${{ needs.deploy-uat.outputs.sha }}
+          UAT_IMAGE: ${{ needs.deploy-uat.outputs.image }}
         run: |
-          prod_sha="$(git rev-parse HEAD)"
-          if [ -z "$UAT_SHA" ] || [ "$UAT_SHA" != "$prod_sha" ] || [ "$prod_sha" != "${{ github.sha }}" ]; then
-            echo "Refusing production deploy: UAT SHA '$UAT_SHA' != production SHA '$prod_sha'" >&2
+          if [ -z "$UAT_IMAGE" ] || [ "$UAT_IMAGE" != "$IMAGE" ] || [[ "$IMAGE" != *@sha256:* ]]; then
+            echo "Refusing production deploy: UAT ran '$UAT_IMAGE', production would run '$IMAGE'" >&2
             exit 1
           fi
+      - name: Write production kubeconfig
+        env:
+          KCFG: ${{ secrets.K3S_KUBECONFIG }}
+        run: |
+          [ -n "$KCFG" ] || { echo "prod environment secret K3S_KUBECONFIG is empty" >&2; exit 1; }
+          umask 077
+          printf '%s\n' "$KCFG" > "$RUNNER_TEMP/kubeconfig"
+          echo "KUBECONFIG=$RUNNER_TEMP/kubeconfig" >> "$GITHUB_ENV"
       - name: Backup, migrate, roll out
         run: bash deployment/k8s/deploy.sh prod "$IMAGE" "${{ github.sha }}"
       - name: Ingress /health
@@ -96,3 +120,6 @@ jobs:
           body="$(curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$URL/health")"
           echo "$body"
           python3 -c 'import json,sys; sys.exit(0 if json.loads(sys.argv[1]).get("database") == "ok" else 1)' "$body"
+      - name: Remove kubeconfig
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kubeconfig"

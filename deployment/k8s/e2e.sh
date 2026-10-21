@@ -73,11 +73,12 @@ done
 kubectl -n "$ns" logs "$pod"
 
 if [ "$code" = 99 ]; then
-  echo "SKIP: deployed image has no tests/e2e (issue 0014 not in this image); browser suite not run"
-  exit 0
+  echo "FAIL: deployed image has no tests/e2e, so the browser suite cannot run" >&2
+  exit 1
 fi
 mkdir -p "$out"
 kubectl -n "$ns" cp "$pod:/app/artifacts/e2e" "$out" > /dev/null || echo "warning: no screenshots copied" >&2
 echo "screenshots: $(find "$out" -name '*.png' | wc -l) in $out"
 [ "$code" = 0 ] || { echo "e2e failed (pytest exit $code)" >&2; exit 1; }
+[ "$(find "$out" -name '*.png' | wc -l)" -gt 0 ] || { echo "e2e passed but produced no screenshots" >&2; exit 1; }
 echo "e2e passed"

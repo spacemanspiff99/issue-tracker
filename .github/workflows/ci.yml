@@ -127,6 +127,24 @@ jobs:
             echo "== $overlay"
             kubectl kustomize "deployment/k8s/overlays/$overlay" | kubeconform -strict -summary -
           done
+      - name: Render deploys pinned by digest (no cluster)
+        run: |
+          digest="ghcr.io/spacemanspiff99/issue-tracker@sha256:$(printf 'a%.0s' $(seq 64))"
+          for env in uat prod; do
+            out="$RUNNER_TEMP/render-$env"
+            RENDER_ONLY_DIR="$out" bash deployment/k8s/deploy.sh "$env" "$digest" "${{ github.sha }}"
+            kubeconform -strict -summary "$out/app.yaml" "$out/jobs.yaml"
+            # Every app-image container is pinned to the digest, never a tag.
+            test "$(grep -ho 'image: ghcr.io.*' "$out"/*.yaml | sort -u)" = "image: $digest" \
+              || { grep -hn 'image: ghcr.io' "$out"/*.yaml; exit 1; }
+            # Backup and migrate share one exact backup path.
+            test "$(grep -A1 'name: BACKUP_FILE' "$out/jobs.yaml" | grep -o '/backups/[^ ]*' | sort -u | wc -l)" = 1
+          done
+      - name: deploy.sh refuses bad inputs
+        run: |
+          for args in "staging img:tag ${{ github.sha }}" "uat img-without-tag ${{ github.sha }}" "uat img:tag not-a-sha" "uat img@sha256:short ${{ github.sha }}"; do
+            if RENDER_ONLY_DIR="$RUNNER_TEMP/x" bash deployment/k8s/deploy.sh $args; then echo "accepted: $args" >&2; exit 1; fi
+          done
       - name: No secret values in deployment/k8s
         run: |
           # Secret manifests exist only as *.example.yaml with placeholder values.

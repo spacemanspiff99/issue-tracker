@@ -18,21 +18,22 @@ spec:
       imagePullSecrets:
         - name: ghcr-pull
       initContainers:
-        # No backup for this SHA, no migration.
+        # No backup from this deploy, no migration.
         - name: require-backup
           image: postgres:16
           env:
-            - name: DEPLOY_SHA
+            - name: BACKUP_FILE
               value: unset
           command:
             - sh
             - -euc
             - |
-              test "$DEPLOY_SHA" != unset
-              for f in /backups/pre-migration/"$DEPLOY_SHA"-*.dump; do
-                test -s "$f" && pg_restore -l "$f" > /dev/null && echo "backup present: $f" && exit 0
-              done
-              echo "refusing to migrate: no pre-migration dump for $DEPLOY_SHA" >&2
+              f="$BACKUP_FILE"
+              if [ "$f" != unset ] && [ -s "$f" ] && pg_restore -l "$f" > /dev/null; then
+                echo "backup present: $f"
+                exit 0
+              fi
+              echo "refusing to migrate: pre-migration dump $f missing or unreadable" >&2
               exit 1
           volumeMounts:
             - name: backups

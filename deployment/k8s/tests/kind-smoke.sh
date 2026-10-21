@@ -11,6 +11,15 @@ here="$(cd "$(dirname "$0")/.." && pwd)"
 
 ctx="$(kubectl config current-context)"
 [[ "$ctx" == kind-* ]] || { echo "refusing: context '$ctx' is not a kind cluster" >&2; exit 2; }
+export EXPECTED_CONTEXT="$ctx"
+expect_fail() {  # expect_fail <description> <command...>
+  local d="$1"; shift
+  if "$@"; then echo "FAIL: expected refusal: $d" >&2; exit 1; fi
+  echo "ok: refused: $d"
+}
+psql_pg() {
+  kubectl -n "$ns" exec issue-tracker-postgres-0 -- sh -c "psql -X -At -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" -c \"$1\""
+}
 
 # k3s names its default class local-path; kind's provisioner is the same rancher local-path one.
 kubectl apply -f - <<'YAML'
@@ -32,16 +41,27 @@ kubectl -n "$ns" create secret generic issue-tracker-app \
   --from-literal=APP_SECRET_KEY="$(openssl rand -hex 32)" \
   --from-literal=ADMIN_INITIAL_PASSWORD=ci-e2e-password --dry-run=client -o yaml | kubectl apply -f -
 
+echo "== deploy refuses the wrong kubectl context"
+expect_fail "context mismatch" env EXPECTED_CONTEXT=issue-tracker-uat "$here/deploy.sh" uat "$image" "$sha"
+
 echo "== first deploy"
 "$here/deploy.sh" uat "$image" "$sha"
-echo "== redeploy same image (idempotent; takes a second pre-migration dump)"
-"$here/deploy.sh" uat "$image" "$sha"
 
-echo "== migration refuses to run without a backup for its SHA"
+echo "== redeploy same image (idempotent; Postgres pod and revision must not change)"
+pg_uid="$(kubectl -n "$ns" get pod issue-tracker-postgres-0 -o jsonpath='{.metadata.uid}')"
+pg_rev="$(kubectl -n "$ns" get statefulset issue-tracker-postgres -o jsonpath='{.status.currentRevision}')"
+"$here/deploy.sh" uat "$image" "$sha"
+[ "$(kubectl -n "$ns" get pod issue-tracker-postgres-0 -o jsonpath='{.metadata.uid}')" = "$pg_uid" ] \
+  || { echo "Postgres pod was replaced by a no-op redeploy" >&2; exit 1; }
+sts="$(kubectl -n "$ns" get statefulset issue-tracker-postgres -o jsonpath='{.status.currentRevision} {.status.updateRevision}')"
+[ "$sts" = "$pg_rev $pg_rev" ] || { echo "StatefulSet revision changed: $pg_rev -> $sts" >&2; exit 1; }
+echo "ok: Postgres pod $pg_uid and revision $pg_rev unchanged"
+
+echo "== migration refuses to run without the backup deploy.sh named"
 kubectl -n "$ns" delete job issue-tracker-migrate --wait=true
 tmp="$(mktemp -d "$here/.render.XXXXXX")"; trap 'rm -rf "$tmp"' EXIT
 kubectl kustomize "$here/overlays/uat/jobs" \
-  | kubectl set env --local -f - DEPLOY_SHA=0000000 -o yaml > "$tmp/jobs.yaml"
+  | kubectl set env --local -f - BACKUP_FILE=/backups/pre-migration/missing.dump -o yaml > "$tmp/jobs.yaml"
 kubectl -n "$ns" apply -f "$tmp/jobs.yaml" -l app.kubernetes.io/component=migrate
 for _ in $(seq 1 60); do
   failed="$(kubectl -n "$ns" get job issue-tracker-migrate -o jsonpath='{.status.failed}')"
@@ -52,6 +72,12 @@ done
 kubectl -n "$ns" logs job/issue-tracker-migrate -c require-backup | grep -q "refusing to migrate"
 [ -z "$(kubectl -n "$ns" get job issue-tracker-migrate -o jsonpath='{.status.succeeded}')" ]
 echo "ok: migrate Job refused without backup"
+kubectl -n "$ns" delete job issue-tracker-migrate --wait=true
+
+echo "== deploy refuses while a migrate Job is active"
+kubectl -n "$ns" create job issue-tracker-migrate --image=postgres:16 -- sleep 300
+kubectl -n "$ns" wait --for=jsonpath='{.status.active}'=1 job/issue-tracker-migrate --timeout=120s
+expect_fail "active migrate Job" "$here/deploy.sh" uat "$image" "$sha"
 kubectl -n "$ns" delete job issue-tracker-migrate --wait=true
 
 echo "== backup CronJob prunes to 14 daily + 5 pre-migration"
@@ -133,4 +159,35 @@ echo "== browser workflow suite"
 "$here/e2e.sh" "$ns"
 shots="$(find "${E2E_OUT:-artifacts/e2e-k8s}" -name '*.png' 2> /dev/null | wc -l)"
 [ "$shots" -gt 0 ] || { echo "e2e produced no screenshots" >&2; exit 1; }
+projects="$(psql_pg 'select count(*) from projects')"
+echo "projects after e2e: $projects"
+[ "$projects" -gt 0 ]
+
+echo "== backup files: off-cluster copy and upload round trip"
+off="$(mktemp -d)"
+"$here/backup-files.sh" uat list
+"$here/backup-files.sh" uat get-latest "$off"
+ls -l "$off"
+daily="$off/$(ls "$off" | grep -E '^[0-9]{8}T[0-9]{6}Z\.dump$' | head -1)"
+[ -s "$daily" ] || { echo "no daily dump copied off-cluster" >&2; exit 1; }
+"$here/backup-files.sh" uat put "$daily" roundtrip.dump
+
+echo "== restore guards"
+expect_fail "restore without CONFIRM" "$here/restore.sh" uat /backups/imports/roundtrip.dump
+expect_fail "--require-empty on a database with projects" \
+  env CONFIRM="$ns" "$here/restore.sh" uat /backups/imports/roundtrip.dump --require-empty
+[ "$(psql_pg 'select count(*) from projects')" = "$projects" ] || { echo "refused restore changed data" >&2; exit 1; }
+echo "ok: refused restore left $projects projects in place"
+
+echo "== restore (rollback path): drop schema + restore the pre-e2e daily dump in one transaction"
+psql_pg 'create table leftover_from_bad_migration (id int)' > /dev/null
+CONFIRM="$ns" "$here/restore.sh" uat /backups/imports/roundtrip.dump
+[ "$(psql_pg "select count(*) from information_schema.tables where table_name = 'leftover_from_bad_migration'")" = 0 ] \
+  || { echo "object from the bad migration survived the restore" >&2; exit 1; }
+restored="$(psql_pg 'select count(*) from projects')"
+[ "$restored" -lt "$projects" ] || { echo "restore did not roll data back ($restored vs $projects)" >&2; exit 1; }
+echo "ok: restored to $restored projects (was $projects); leftover table gone"
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+kubectl -n "$ns" exec deploy/issue-tracker -c app -- python -c \
+  "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert d['database'] == 'ok', d; print(d)"
 echo "kind smoke passed"

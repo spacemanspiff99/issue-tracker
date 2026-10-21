@@ -40,6 +40,7 @@ spec:
                 - -euc
                 - |
                   mkdir -p /backups/daily /backups/pre-migration
+                  rm -fv /backups/daily/*.partial
                   f="/backups/daily/$(date -u +%Y%m%dT%H%M%SZ).dump"
                   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$f.partial"
                   pg_restore -l "$f.partial" > /dev/null
