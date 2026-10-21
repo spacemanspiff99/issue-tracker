@@ -334,6 +334,8 @@ class SprintService:
         issue = self.repo.get_issue(issue_id)
         if sprint.project_id != issue.project_id:
             raise DomainError("Sprint and issue belong to different projects")
+        if issue.status == IssueStatus.DONE and issue.closed_at is not None:
+            raise DomainError("Closed issue cannot be added to a sprint")
         issue.status = IssueStatus.IN_PROGRESS
         membership = SprintIssue(
             sprint_id=sprint_id,

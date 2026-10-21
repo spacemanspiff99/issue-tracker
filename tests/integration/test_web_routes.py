@@ -4,7 +4,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from issue_tracker.db import get_session
+from issue_tracker.domain.enums import IssueStatus
 from issue_tracker.domain.models import Issue
+from issue_tracker.services.tracker import IssueService
 from issue_tracker.web.app import create_app
 
 
@@ -171,3 +173,22 @@ def test_sprint_issue_domain_error_renders_inline(engine):
     cross = client.post(f"{sprint_path}/issues", data={"issue_id": foreign.id})
     assert cross.status_code == 400
     assert "Sprint and issue belong to different projects" in cross.text
+
+
+def test_sprint_add_closed_issue_renders_inline_error_and_keeps_it_closed(engine):
+    client, maker = make_client(engine)
+    client.post("/setup", data={"username": "admin", "password": "secret"})
+    project_path, (closed,) = _project_with_issues(client, maker, titles=("Closed",))
+    with maker() as session:
+        IssueService(session).update_status(closed.id, "done", originating_llm="gpt-5.5")
+    sprint_path = client.post(f"{project_path}/sprints", data={"goal": "MVP"}, follow_redirects=False).headers[
+        "location"
+    ]
+
+    added = client.post(f"{sprint_path}/issues", data={"issue_id": closed.id})
+    assert added.status_code == 400
+    assert "Closed issue cannot be added to a sprint" in added.text
+    with maker() as session:
+        issue = session.get(Issue, closed.id)
+        assert issue.status == IssueStatus.DONE
+        assert issue.closed_at is not None
