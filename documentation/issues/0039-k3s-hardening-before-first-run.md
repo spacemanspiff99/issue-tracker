@@ -1,6 +1,6 @@
 # Issue 0039: Harden The k3s Deploy And Restore Path Before The First Real-Cluster Run
 
-Status: in-progress (PR #22; second review round in progress)
+Status: in-progress (PR #22, review-2 fixes green on d6a1290; awaiting independent review)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`, `IT-3`
 Sprint: Sprint 0007
@@ -49,13 +49,24 @@ Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/3
   - `k3s-pipeline.yml:66` refuses a non-main ref unless `allow_non_main_uat: true`. `promote_prod` from a branch is refused even with that override.
   - All 14 gate cases pass in CI (CI step "Pipeline ref and digest gates", `ci.yml:143`).
 - [x] **NB8: Postgres pinned.** Every Postgres image in `deployment/k8s` is `postgres:16.15` (16.15 is what the kind run reported). The CI step "Postgres images pinned to a minor version" (`ci.yml:145`) fails on an unpinned one.
-- [ ] **Review 2, B1:** a migrate or backup failure (timeout, cancel) deletes both Jobs (foreground, waits until their pods are gone) and brings the old app back only if `alembic_version` is provably unchanged. Otherwise the app stays at 0 with instructions. Proven in kind with a lock-blocked migration (stays at 0) and a failing backup (old app back).
-- [ ] **Review 2, N1:** `restore.sh --keep-app-down`. The guide's rollback order is restore, then set image, then scale up, and it says UAT must be restored too before a revert passes the UAT stage.
-- [ ] **Review 2, N2:** the image job fails on any `imagetools inspect` error other than "not found".
-- [ ] **Review 2, N3:** `promote_prod` requires `expected_image` (gate cases in CI).
-- [ ] **Review 2, N4:** a missing Deployment is detected with `--ignore-not-found`, so any other API error fails the deploy instead of skipping the maintenance window.
-- [ ] **Review 2, N5:** an old pod that is still running at the timeout aborts the deploy before the backup, and the guide has a "Found the app at 0 replicas" section.
-- [ ] **CI green on the final head.**
+Review 2 evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/39550919000 (head `d6a1290`), job `k8s`. Line refs are as of `d6a1290`.
+
+- [x] **Review 2, B1: safe failure path for backup and migrate.**
+  - `deploy.sh:141-167`: `on_failure` runs on any exit before rollout (including INT/TERM). It first deletes the backup and migrate Jobs (`--cascade=foreground --wait`), then reads `alembic_version`. The read uses `lock_timeout` and fails closed (`deploy.sh:120-130`). The old app comes back only if the Jobs are confirmed gone and the version is unchanged (`deploy.sh:161`); otherwise it prints "LEAVING THE APP AT 0" with what to check (`deploy.sh:154,157`).
+  - kind (`kind-smoke.sh:183`), migration blocked by an ACCESS EXCLUSIVE lock past a 60s timeout: printed "deploy failed during: migrate" and "LEAVING THE APP AT 0 … lock timeout". The migrate Job was gone, replicas=0, and afterwards "alembic_version still 0004_reconcile_schema_drift".
+  - kind (`kind-smoke.sh:216`), failing backup: printed "deploy failed during: backup" and "Jobs deleted and alembic_version unchanged (0004…); restoring the previous app (replicas=1)". The migrate Job never ran.
+- [x] **Review 2, N1: rollback order.**
+  - `restore.sh --keep-app-down` (`restore.sh:8-13`); kind printed "--keep-app-down left the app at 0".
+  - `k3s.md` Rollback 2 is now: restore `--keep-app-down`, then `set image` to the previous digest, then scale up. It also states that UAT carries the bad revision and must be restored before a revert on `main` can pass the UAT stage (`k3s.md:460`).
+- [x] **Review 2, N2:** `image.yml:46-50` rebuilds only on "not found" or "manifest unknown"; any other `imagetools inspect` error fails the job.
+- [x] **Review 2, N3: `promote_prod` needs `expected_image`.**
+  - Refused without it in UAT (`k3s-pipeline.yml:70`) and in prod (`k3s-pipeline.yml:137`).
+  - CI gate cases "promote without expected_image refused" and "prod: no expected_image refused" pass (15/15). Guide step 10 now gives the two-run release flow.
+- [x] **Review 2, N4:** `deploy.sh:140` uses `--ignore-not-found`, so only a missing Deployment skips the maintenance window; any other API error fails the deploy (`set -e`).
+- [x] **Review 2, N5:**
+  - `deploy.sh:173-174`: the wait for the old pod has no `|| true`, so a pod still running at the timeout aborts before the backup, and `on_failure` brings the app back.
+  - The guide has a "Found the app at 0 replicas" section (`k3s.md:420`).
+- [x] **CI green on the final head:** 5/5 pass on `d6a1290`.
 
 Review 2's N6 and N7 are tracked in Issue 0040.
 
