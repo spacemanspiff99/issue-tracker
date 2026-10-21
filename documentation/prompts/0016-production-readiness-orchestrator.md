@@ -1,5 +1,8 @@
 # Prompt 0016: Production Readiness Orchestrator (192.168.10.8)
 
+> **Superseded for release.** Production is k3s (`documentation/guides/k3s.md`); the `192.168.10.8`
+> Compose production path is retired (issue 0038). Do not follow this prompt's deploy steps.
+
 Paste everything below the line into a fresh Claude Code cloud session on `spacemanspiff99/issue-tracker`
 (environment `Issue-dev-cloud`), model `claude-opus-5-5`, effort `low` (`/effort low`).
 
