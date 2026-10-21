@@ -282,6 +282,29 @@ echo "== restore --require-empty passes on an EMPTY projects table (NB2)"
 [ "$(psql_pg 'select count(*) from projects')" = 0 ]
 CONFIRM="$ns" "$here/restore.sh" uat "$head_dump" --require-empty
 echo "ok: --require-empty passed with an empty projects table"
+# 0042 N3: alembic_version was the same before and after, so the app is back at its previous 1.
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 1 ] \
+  || { echo "same-revision restore did not bring the app back to 1 replica" >&2; exit 1; }
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+echo "ok: same-revision restore brought the app back to 1 replica"
+
+echo "== restore that changes alembic_version leaves the app at 0; leaked pin cleared (0042 N1, N2)"
+# A pin leaked by a SIGKILLed restore Job (bash as PID 1 ignores SIGTERM, so its EXIT trap never ran).
+pvc_sh plant-stale-pin "mkdir -p /backups/restoring && ln $head_dump /backups/restoring/killed-pod.dump"
+# The live schema reads as another revision than the dump's, as after a deploy migrated past it.
+psql_pg "update alembic_version set version_num = '0003_fake_other'" > /dev/null
+n1_log="$(mktemp)"
+if CONFIRM="$ns" "$here/restore.sh" uat "$head_dump" > "$n1_log" 2>&1; then
+  cat "$n1_log"; echo "a restore across revisions exited 0" >&2; exit 1
+fi
+cat "$n1_log"
+grep -q "alembic_version went from '0003_fake_other' to '" "$n1_log"
+grep -q "removed '/backups/restoring/killed-pod.dump'" "$n1_log"
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
+  || { echo "restore across revisions scaled the app up" >&2; exit 1; }
+[ "$(psql_pg 'select version_num from alembic_version')" != 0003_fake_other ]
+pvc_sh check-no-pins 'test -z "$(ls -A /backups/restoring)"'
+echo "ok: app left at 0 after a restore that changed alembic_version; stale pin removed, no pin left"
 
 echo "== restore --require-empty passes when projects is ABSENT (NB2)"
 kubectl -n "$ns" scale deployment/issue-tracker --replicas=0

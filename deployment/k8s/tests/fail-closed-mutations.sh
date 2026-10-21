@@ -59,6 +59,12 @@ mutate deploy.sh "…and on_failure can't read version" \
 mutate deploy.sh "app pods gone?" \
   'if ! pods="$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name --request-timeout=10s)"; then' \
   'if ! pods="$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name --request-timeout=10s || true)"; then'
+mutate restore.sh "success, schema changed: app left at 0 (N1)" \
+  'v_before="" v_after="" schema_same=0' \
+  'v_before="" v_after="" schema_same=1'
+mutate restore.sh "another restore started meanwhile (N4)" \
+  'if [ -n "$active" ]; then' \
+  'if false; then'
 
 if [ "$bad" -ne 0 ]; then
   echo "$bad mutation(s) not caught" >&2

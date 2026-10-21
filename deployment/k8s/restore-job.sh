@@ -6,12 +6,30 @@ set -euo pipefail
 
 # Pin the dump with a hard link outside the pruned folders, so no prune (the daily CronJob, the
 # backup Job, or this script) can remove it while it is being restored. Restore from the pin.
+# Restores never overlap (restore.sh refuses while one is active), so any pin already here was leaked
+# by a killed restore Job: bash as PID 1 ignores SIGTERM, so a SIGKILL (grace period, OOM) skips the
+# EXIT trap. Clear those first; each leaked hard link would otherwise keep its dump's space in use.
 mkdir -p /backups/restoring
+rm -fv /backups/restoring/*.dump
 pin="/backups/restoring/${HOSTNAME:-local}.dump"
-rm -f "$pin"
 ln "$DUMP" "$pin"
 trap 'rm -f "$pin"' EXIT
 pg_restore -l "$pin" > /dev/null
+
+# The schema revision, "(none)" if there is no alembic_version table; any other error fails.
+# restore.sh compares the before and after lines to decide whether the app may come back.
+db_version() {
+  local present
+  present="$(psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select to_regclass('public.alembic_version') is not null")" || return 1
+  if [ "$present" = t ]; then
+    psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      -c "select coalesce(string_agg(version_num, ',' order by version_num), '(empty)') from alembic_version" || return 1
+  else
+    echo '(none)'
+  fi
+}
+before="$(db_version)"
+echo "alembic_version before restore: $before"
 echo "dump readable: $DUMP ($(pg_restore -l "$pin" | grep -c ' TABLE DATA ' || true) tables with data)"
 
 # Safety copy of the database as it is now, before anything is dropped. Pruning to the newest 5
@@ -54,5 +72,5 @@ SQL
 } | psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" > /dev/null
 echo "restore committed"
 ls -1t /backups/pre-restore/*.dump | grep -vxF "$DUMP" | tail -n +6 | xargs -r rm -fv || true
-psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'select version_num from alembic_version' \
-  | sed 's/^/alembic_version after restore: /' || echo "alembic_version after restore: (none)"
+after="$(db_version)" || after="(unreadable)"
+echo "alembic_version after restore: $after"

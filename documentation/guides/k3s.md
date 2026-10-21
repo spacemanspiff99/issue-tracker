@@ -404,11 +404,14 @@ keeps the pod and the PVC) and redeploy.
 session that points at this database: the stdio MCP server opens its own DB connection and doesn't
 go through the web app. **Don't run a restore while a pipeline deploy is running** in the same
 namespace; wait for the run to finish (or check Actions) first. The script then:
-- refuses if a backup, migrate or another restore Job is active
+- refuses if a backup, migrate or another restore Job is active, and checks again just before it
+  creates its Job (a second restore started meanwhile makes it stop with the app at 0)
 - scales the app to zero
 - runs a Job (`restore-job.sh`) that:
-  - pins the dump with a hard link in `/backups/restoring/`, so no prune can delete it mid-restore,
-    and checks it with `pg_restore -l`
+  - clears pins leaked in `/backups/restoring/` by an earlier restore Job that was killed, then
+    pins the dump with a hard link there, so no prune can delete it mid-restore, and checks it
+    with `pg_restore -l`
+  - logs `alembic_version` before and after the restore
   - writes a **safety dump of the current database** to `/backups/pre-restore/<ts>-<pod>.dump`
     (after a successful restore the newest 5 are kept, never counting or deleting the dump that
     was just restored)
@@ -421,8 +424,13 @@ from a bad migration don't survive. This gives the same all-or-nothing behavior 
 `pg_restore --single-transaction --exit-on-error`, and extends it to cover the schema drop.
 
 Outcomes:
-- **Succeeded:** the app goes back to its previous replica count (an app that was at 0 stays at 0),
-  or stays at 0 with `--keep-app-down`.
+- **Succeeded, same `alembic_version` before and after:** the app goes back to its previous replica
+  count (an app that was at 0 stays at 0), or stays at 0 with `--keep-app-down`.
+- **Succeeded, but `alembic_version` changed** (for example a `pre-migration` dump restored after a
+  deploy migrated past it), or the Job logs can't be read: the app **stays at 0**, because its
+  current image may not match the restored schema. The script exits non-zero and prints both
+  versions; follow Rollback 2 (`set image` to an image that matches, then scale up), or run the
+  pipeline, whose deploy migrates the restored data forward and brings the app up.
 - **Failed before `COMMIT`** (the Job logs prove it): the database is unchanged and the app goes
   back to its previous replica count, or stays at 0 if it was at 0 or `--keep-app-down` was given.
 - **Failed, and the logs can't show whether it committed:** the app stays at 0; check as in "Found
@@ -437,7 +445,9 @@ If a restore itself was the mistake, restore the safety dump it took:
 
 ```bash
 deployment/k8s/backup-files.sh prod list
-CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/pre-migration/<sha>-<ts>.dump
+# A pre-migration dump is at the revision BEFORE that deploy's migration: keep the app down and
+# set the matching image as in Rollback 2 before scaling up.
+CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/pre-migration/<sha>-<ts>.dump --keep-app-down
 ```
 
 To restore a dump from outside the cluster, upload it first with
@@ -446,8 +456,8 @@ To restore a dump from outside the cluster, upload it first with
 ## Found the app at 0 replicas
 
 A failed or cancelled deploy, a timed-out restore, a restore that aborted because the app pod
-wouldn't stop (or its pods couldn't be listed), or `restore.sh --keep-app-down` can leave the app
-at 0. The
+wouldn't stop (or its pods couldn't be listed), a restore that changed `alembic_version`, or
+`restore.sh --keep-app-down` can leave the app at 0. The
 script's last log lines say why. Before scaling up, check that the image and the schema match:
 
 ```bash
