@@ -1,6 +1,6 @@
 # Issue 0042: k3s Restore: Schema-Matched Scale-Up, Leaked Pins, Concurrent Restores
 
-Status: in-progress (PR #27, green on bc112f2; awaiting review)
+Status: done (PR #27, merged as `b0490e3`; review follow-ups in Issue 0047)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
