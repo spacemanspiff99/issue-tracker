@@ -1,6 +1,6 @@
 # Issue 0008: Local Runtime Gate For Manual UAT
 
-Status: done
+Status: in-progress — dev-path (Compose) AC pass at `cac4a09`; k3s UAT AC marked OWNER are open.
 Recommended model: GPT-5.5 high
 Category gates: `IT-3`, `IT-6`
 Sprint: Sprint 0007
@@ -20,26 +20,25 @@ Manual UAT cannot start until the local Docker runtime proves it can build the a
 
 ## Acceptance Criteria
 
-- [x] `docker compose -f deployment/docker-compose.local.yml build` completes without host Python setup. Proven by CI `e2e` (`$COMPOSE up -d --build postgres app`, clean runner, no host Python) on `c10970f`: [run](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39466799278/job/118780179039). Blocked in the cloud container only (network policy denies `deb.debian.org`).
-- [x] `docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head` succeeds against local PostgreSQL.
-- [x] `docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/` passes.
-- [x] `docker compose -f deployment/docker-compose.local.yml up` starts app and PostgreSQL.
-- [x] `GET /health` returns app readiness and database connectivity.
-- [x] No `.env`, logs, database dumps, backups, generated exports, or local credentials are committed.
+UAT runs on k3s `issue-tracker-uat` ([`k3s.md`](../guides/k3s.md)); Docker Compose is the dev path.
+Dev-path evidence: cloud container, Docker 29.9.1, fresh volume (`down -v`), app code at `cac4a09`
+(merge of `main` @ `5a7db65` + seed-demo guard). Full table: [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md).
 
-## Evidence (2026-10-20, `a98b164`, cloud container)
+Dev path (local Docker Compose):
 
-Full table in [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md).
+- [x] `docker compose -f deployment/docker-compose.local.yml build` completes without host Python setup. CI `e2e` builds and starts the compose stack on a clean runner with no host Python (`$COMPOSE up -d --build postgres app`; [run 39545418717, job `e2e`](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39545418717/job/119042384075) on `cac4a09`). In the cloud container `build` as written is blocked by environment only (pip/apt TLS through the session proxy); the image was built from the same context minus the `playwright install --with-deps` line, see notes.
+- [x] `... run --rm app alembic upgrade head` succeeds against local PostgreSQL → `0001_initial → 0002_guidance_sync → 0003_guidance_audit_events → 0004_reconcile_schema_drift` on a fresh volume (`cac4a09`).
+- [x] `... run --rm app python -m pytest tests/` passes → `70 passed, 22 skipped` (`cac4a09`; e2e skipped without `RUN_BROWSER_UAT`). `... run --rm app python -m ruff check --no-cache .` → `All checks passed!` (plain `ruff check .` in the container → [0045](0045-ruff-in-app-container-cache-permission.md)).
+- [x] `... up -d` starts app and PostgreSQL (`cac4a09`).
+- [x] `GET /health` returns app readiness and database connectivity → `curl -fsS http://localhost:8000/health` = `{"ok":true,"database":"ok"}` (`cac4a09`).
+- [x] No `.env`, logs, database dumps, backups, generated exports, or local credentials are committed → `git status --short` after the run shows only intended source/doc files; `artifacts/`, `exports/` gitignored.
 
-- `config -q` → exit 0.
-- `build` → CI `e2e` job built and started the compose stack on `c10970f` ([run](https://github.com/spacemanspiff99/issue-tracker/actions/runs/39466799278/job/118780179039)). In the cloud container it was blocked by environment (Docker Hub 429, then apt `403` for `deb.debian.org`); image built from the same context minus the `playwright install --with-deps` line. Owner re-runs `build` as written on the LAN.
-- `alembic upgrade head` on a fresh volume → `0001_initial … 0004_reconcile_schema_drift`.
-- `pytest tests/` in the app container → `22 passed, 22 skipped` (e2e skipped without `RUN_BROWSER_UAT`).
-- `up -d` → app + postgres running; `/health` → `{"ok":true,"database":"ok"}`.
-- `RUN_BROWSER_UAT=1 pytest tests/e2e` against the stack → `22 passed`, 70 screenshots.
-- `git status` after the run: only intended source/doc files; `exports/` and `artifacts/` gitignored.
-- Originating model: claude-opus-5-5 (effort: low).
-- In-container `ruff check .` fails on cache permissions → [0045](0045-ruff-in-app-container-cache-permission.md) (`--no-cache` passes).
+UAT (k3s `issue-tracker-uat`) — needs the real cluster:
+
+- [ ] **OWNER** — Actions → **k3s UAT Production Pipeline** → Run workflow on `main` (after this PR merges) with `promote_prod: false`. Expected in the log: pushed digest `ghcr.io/spacemanspiff99/issue-tracker@sha256:…`; backup Job writes `/backups/pre-migration/<sha>-<ts>.dump`; migrate Job runs `alembic upgrade head` (`… -> 0004_reconcile_schema_drift` on an empty DB); rollout complete; `health: {"ok": true, "database": "ok"}` in the pod and through the ingress; browser suite `22 passed`, artifact `uat-e2e-screenshots-<sha>`. Record the run URL + SHA here.
+- [ ] **OWNER** — `K="kubectl -n issue-tracker-uat"; $K get deploy issue-tracker -o jsonpath='{.spec.template.spec.containers[0].image}'` → the same `@sha256:` digest as that run; `curl -fsS http://issue-tracker-uat.home.arpa/health` → `{"ok":true,"database":"ok"}`.
+
+Originating model: claude-opus-5-5 (effort: medium).
 
 ## Category Checklists
 
@@ -49,12 +48,22 @@ Full table in [UAT notes](../uat/2026-10-20-cloud-container-uat-readiness.md).
 
 ## Verification Commands
 
+Dev path:
+
 ```bash
-docker compose -f deployment/docker-compose.local.yml config
+docker compose -f deployment/docker-compose.local.yml config -q
 docker compose -f deployment/docker-compose.local.yml build
 docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade head
 docker compose -f deployment/docker-compose.local.yml run --rm app python -m pytest tests/
-docker compose -f deployment/docker-compose.local.yml up
+docker compose -f deployment/docker-compose.local.yml up -d && curl -fsS http://localhost:8000/health
+```
+
+UAT (owner, cluster access): the pipeline run above, then
+
+```bash
+K="kubectl -n issue-tracker-uat"
+$K get deploy issue-tracker -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+curl -fsS http://issue-tracker-uat.home.arpa/health
 ```
 
 ## STOP

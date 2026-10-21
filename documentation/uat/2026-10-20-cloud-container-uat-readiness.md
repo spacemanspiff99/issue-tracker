@@ -12,6 +12,34 @@ Covers issues [0008](../issues/0008-local-runtime-gate.md), [0009](../issues/000
 [0010](../issues/0010-demo-data-and-reset-safe-uat.md), [0011](../issues/0011-mcp-local-uat-smoke.md).
 Release decision stays with [0012](../issues/0012-uat-findings-and-release-decision.md).
 
+## Re-run 2026-10-21 at `cac4a09` (after merging `main` @ `5a7db65`, k3s era)
+
+Dev path only (Compose in a cloud container; same environment deviations as below). This run is
+**not** a UAT result: UAT is k3s `issue-tracker-uat` ([`manual-uat.md`](../guides/manual-uat.md)).
+
+| Check | Result |
+|---|---|
+| `config -q` | exit 0 |
+| `build` as written | Blocked (env): pip TLS through the session proxy; built from the same context minus `playwright install --with-deps` on a local proxy-CA base tag |
+| `alembic upgrade head`, fresh volume | `0001_initial` → … → `0004_reconcile_schema_drift` |
+| `ruff check --no-cache .` (container) | `All checks passed!` |
+| `pytest tests/` (container) | `70 passed, 22 skipped` |
+| `up -d` + `/health` | `{"ok":true,"database":"ok"}` |
+| `RUN_BROWSER_UAT=1 pytest tests/e2e` (host Chromium → compose app) | `22 passed in 40.11s`, 72 screenshots |
+| `seed-demo` / rerun | `"created": true` (0001–0003, sprint 0004, 0005) / `"created": false` |
+| `seed-demo` target guard | prod namespace, other namespace, unknown namespace, `192.168.10.8` host → all `refusing seed-demo: …`, exit 1, no DB connection |
+| `restore.sh uat` refusals (stub `kubectl`, no cluster) | missing/wrong `CONFIRM`, prod context, env `issue-tracker` → exit 2 |
+| MCP `--smoke` / `test_mcp_tools.py` | 11 tools, equals guide / `4 passed` |
+| MCP live compact output | search 449 B, no AC, `limit=500` → 50; get 115 B / full 265 B |
+| MCP stdio (mcp `2.3.0`) | **Fail** — stdout 0 lines; stderr `mcp package is required to run the stdio server` → [0043](../issues/0043-mcp-2x-breaks-stdio-server.md) |
+
+Owed on k3s UAT (OWNER steps with expected output in issues 0008–0011): pipeline run with
+`promote_prod: false`, `/health` through the ingress, `e2e.sh issue-tracker-uat`, in-pod
+`seed-demo`, in-pod MCP smoke + stdio, human click-through. Verdict: **BLOCKED: MCP stdio (0043)
+and k3s UAT not yet run — owner steps in 0008–0011.**
+
+The tables below are the original 2026-10-20 run at `a98b164`.
+
 ## Environment deviations (read first)
 
 - The container's network policy denies `deb.debian.org` (proxy 403), so the Dockerfile's
