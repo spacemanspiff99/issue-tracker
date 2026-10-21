@@ -217,8 +217,10 @@ Run workflow on `main` with `promote_prod: false`. The run log should show:
 already-pushed SHA is never rebuilt), redeploys it to UAT, then promotes it. If the digest
 differs, both deploy jobs refuse; start again from step 1. That happens when `main` moved in
 between, or when the tag in GHCR was deleted or overwritten since the first run. A push-to-main
-image build and a pipeline run for the same commit cannot race: both use the concurrency group
-`image-<sha>`, so the second waits for the first and reuses its digest.
+image build and a pipeline run for the same commit don't race: both use the concurrency group
+`image-<sha>`, so the second waits for the first and reuses its digest. A *third* run for the same
+SHA while one is still waiting replaces it: GitHub cancels the waiting image job, and that run
+ends as cancelled before any deploy step (nothing is deployed); start it again.
 
 **11. First production deploy.** Run the pipeline with `promote_prod: true` and `expected_image`
 (as in step 10). `Deploy PRODUCTION
@@ -430,8 +432,9 @@ To restore a dump from outside the cluster, upload it first with
 
 ## Found the app at 0 replicas
 
-A failed or cancelled deploy, a timed-out restore, or `restore.sh --keep-app-down` can leave the
-app at 0. The
+A failed or cancelled deploy, a timed-out restore, a restore that aborted because the app pod
+wouldn't stop (or its pods couldn't be listed), or `restore.sh --keep-app-down` can leave the app
+at 0. The
 script's last log lines say why. Before scaling up, check that the image and the schema match:
 
 ```bash

@@ -1,6 +1,6 @@
 # Issue 0041: k3s Cutover Polish Before The First Real Run
 
-Status: in-progress (PR #25, CI green on 2578a4a; awaiting independent review)
+Status: in-progress (PR #25; review-1 fixes pushed)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
@@ -32,6 +32,16 @@ Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/3
 - [x] **NB5: migrate timeout with the version unchanged brings the old app back.** kind (`kind-smoke.sh:233`): a quota blocked the migrate pod, and the log showed "deploy failed during: migrate", then "Jobs deleted and alembic_version unchanged (0004_reconcile_schema_drift); restoring the previous app (replicas=1)", then "ok: migrate timed out -> … old app scaled back up".
 - [x] **Also found and fixed:** `kubectl wait --for=delete pod -l …` errors ("no matching resources") when the selector is already empty. Both scripts now poll with `wait_app_gone` (`deploy.sh:120`, `restore.sh:50`).
 - [x] **CI green on the PR:** 5/5 on `2578a4a`.
+
+Review 1 of PR #25:
+- [ ] **B1: `wait_app_gone` fails closed.** It captures `kubectl get pods --request-timeout=10s` and returns 1 if kubectl fails, so a failed list never counts as "gone". `deployment/k8s/tests/fail-closed.sh` (no cluster; stub kubectl whose `get pods` fails) runs the real scripts:
+  - `deploy.sh` must abort in the maintenance window, never apply the backup or migrate Job, and scale the old app back to 1.
+  - `restore.sh` must abort before creating any ConfigMap or Job.
+  - The same test fails against the `3fe776e` scripts: the old `deploy.sh` went on to the backup after "connection refused".
+- [ ] **N1:** when `restore.sh` aborts because the app won't stop, it prints the next steps. The "Found the app at 0 replicas" intro now lists that case.
+- [ ] **N3:** `k3s.md` now says a third run for the same SHA can cancel the waiting image job; that run ends cancelled before any deploy.
+- [ ] **N4:** the kind PV-release wait fails after 120s instead of carrying on.
+- [ ] CI 5/5 on the new head.
 
 ## Category Checklists
 

@@ -46,11 +46,17 @@ active="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o js
 # Stop the in-cluster writer. stdio MCP clients open their own DB sessions (e.g. via kubectl
 # exec or a port-forward); the owner must close those first (documentation/guides/k3s.md).
 # Wait until no app (component=web) pod exists; fail after $1 seconds. Unlike
-# `kubectl wait --for=delete -l`, an already-empty selector counts as success.
+# `kubectl wait --for=delete -l`, an already-empty selector counts as success. Fails closed:
+# if the pod list can't be read, that is an error, never "gone".
 wait_app_gone() {
-  local deadline=$((SECONDS + $1))
-  while [ -n "$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name)" ]; do
-    (( SECONDS < deadline )) || { echo "app pod still present after $1s" >&2; return 1; }
+  local deadline=$((SECONDS + $1)) pods
+  while :; do
+    if ! pods="$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name --request-timeout=10s)"; then
+      echo "could not list app pods in $ns; refusing to assume the app is stopped" >&2
+      return 1
+    fi
+    [ -n "$pods" ] || return 0
+    (( SECONDS < deadline )) || { echo "app pod still present after $1s: $pods" >&2; return 1; }
     sleep 2
   done
 }
@@ -63,7 +69,12 @@ if kubectl -n "$ns" get deployment issue-tracker --ignore-not-found -o name | gr
   has_app=1
   [ "${replicas:-0}" -ge 1 ] || replicas=1
   kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
-  wait_app_gone 120
+  if ! wait_app_gone 120; then
+    echo "restore aborted before touching the database (no safety dump, no restore). The app is" >&2
+    echo "scaled to 0 but may still be running. Check: kubectl -n $ns get pods -l app.kubernetes.io/component=web" >&2
+    echo "Then retry the restore, or bring the app back: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas" >&2
+    exit 1
+  fi
 else
   replicas=1
   echo "no issue-tracker Deployment in $ns yet; nothing to stop"

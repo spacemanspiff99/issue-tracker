@@ -147,6 +147,8 @@ jobs:
           if grep -rnE 'image: *postgres(:16)?( |$)|postgres:16([^.0-9]|$)' deployment/k8s; then
             echo "unpinned postgres image in deployment/k8s" >&2; exit 1
           fi
+      - name: deploy.sh and restore.sh fail closed when pods can't be listed
+        run: bash deployment/k8s/tests/fail-closed.sh
       - name: deploy.sh refuses bad inputs
         run: |
           for args in "staging img:tag ${{ github.sha }}" "uat img-without-tag ${{ github.sha }}" "uat img:tag not-a-sha" "uat img@sha256:short ${{ github.sha }}"; do

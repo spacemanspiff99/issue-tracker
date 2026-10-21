@@ -362,8 +362,9 @@ echo "== first deploy into a FRESH namespace and volume, 3 times (Postgres init 
 # DATABASE; deploy.sh must wait for the real server over TCP instead of racing it.
 for i in 1 2 3; do
   kubectl delete namespace "$ns" --wait=true --timeout=300s
-  for _ in $(seq 1 60); do
-    [ -z "$(kubectl get pv -o jsonpath="{range .items[?(@.spec.claimRef.namespace=='$ns')]}{.metadata.name}{end}")" ] && break
+  pv_deadline=$((SECONDS + 120))
+  until [ -z "$(kubectl get pv -o jsonpath="{range .items[?(@.spec.claimRef.namespace=='$ns')]}{.metadata.name}{end}")" ]; do
+    (( SECONDS < pv_deadline )) || { kubectl get pv >&2; echo "old PVs for $ns not released within 120s" >&2; exit 1; }
     sleep 2
   done
   owner_setup
