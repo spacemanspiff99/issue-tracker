@@ -69,3 +69,5 @@ Do not expand this sprint into production deployment, GitHub issue sync, multi-u
 ## Production Readiness
 
 Historical orchestrator prompt for this sprint (its `192.168.10.8` release steps are superseded; production is k3s, see `../guides/k3s.md`): [`../prompts/0016-production-readiness-orchestrator.md`](../prompts/0016-production-readiness-orchestrator.md).
+
+Release to k3s production: [`../prompts/k3s-production-release.md`](../prompts/k3s-production-release.md); owner UAT run sheet: [`../uat/2026-10-21-k3s-uat.md`](../uat/2026-10-21-k3s-uat.md).
