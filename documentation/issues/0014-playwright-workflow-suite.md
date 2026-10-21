@@ -1,6 +1,6 @@
 # Issue 0014: Playwright Workflow Suite With Step Screenshots
 
-Status: in-progress
+Status: in-progress (merged in #10, 680169a; last AC unverified)
 Recommended model: claude-opus-5-5 medium
 Category gates: `IT-1`, `IT-5`, `IT-6`
 Sprint: Sprint 0007
@@ -17,11 +17,11 @@ No browser tests exist. `deployment/scripts/remote-compose-deploy.sh` runs `pyte
 
 ## Acceptance Criteria
 
-- [ ] Every catalog workflow has a test whose steps match the catalog, including its failure path.
-- [ ] Every step asserts with a locator/URL/text check and saves a full-page screenshot.
-- [ ] `RUN_BROWSER_UAT=1 python -m pytest tests/e2e` passes against a fresh migrated stack; tests skip without the env var.
-- [ ] CI e2e job is green and its artifact contains a screenshot per step per viewport.
-- [ ] `RUN_BROWSER_UAT=1` path in `remote-compose-deploy.sh` runs the suite successfully on a compose stack.
+- [x] Every catalog workflow has a test whose steps match the catalog, including its failure path. Evidence: `grep -n "def test_" tests/e2e/*.py` at `b6a0092` lists all 11 tests in the map below; 0019 (#12, a98b164) removed the strict xfails, so every failure path now runs as a normal test.
+- [x] Every step asserts with a locator/URL/text check and saves a full-page screenshot. Evidence: 38 `step(` calls vs 60 `expect(`/`assert` lines across `tests/e2e/test_*.py` (each `step()` preceded by its assertions); CI run 39458603486 collected 72 PNGs.
+- [x] `RUN_BROWSER_UAT=1 python -m pytest tests/e2e` passes against a fresh migrated stack; tests skip without the env var. Evidence: CI `e2e` job on `b6a0092` (fresh compose volume → `alembic upgrade head` → health) → `22 passed in 19.18s`; locally without the env var `python -m pytest -q tests` → `48 passed, 22 skipped`.
+- [x] CI e2e job is green and its artifact contains a screenshot per step per viewport. Evidence: run 39458603486 job `e2e` success on `b6a0092`; "Collect screenshots" counted `72`; artifact `e2e-screenshots` (id 12280459718, 2.4 MB) uploaded. 22 passed = 11 tests × 2 viewports.
+- [ ] `RUN_BROWSER_UAT=1` path in `remote-compose-deploy.sh` runs the suite successfully on a compose stack. **Not verified.** CI runs the same `exec app python -m pytest tests/e2e/` command but not the script. No `local-pipeline.yml` run since #10 merged (latest run 2026-05-26). 2026-10-21 cloud attempt (script run against localhost through a local `ssh` stand-in, `DEPLOY_ENV=uat`) failed twice in `docker compose build` because the sandbox's TLS proxy breaks pip, apt and the Playwright download inside the build. That's a sandbox limit, not a repo defect. Needs one self-hosted-runner run with `run_browser_uat: true` against dev/UAT (owner-approved dispatch).
 
 ## Workflow → test map
 
@@ -44,7 +44,7 @@ Each test runs at desktop 1280×800 and mobile 390×844. W-SETUP's fresh-DB step
 - Local (cloud session, Postgres 16 + `alembic upgrade head` on an empty DB, uvicorn, Chromium):
   `RUN_BROWSER_UAT=1 python -m pytest -q tests/e2e` → `16 passed, 6 xfailed`; 70 screenshots.
 - Without the env var: `python -m pytest -q tests` → `12 passed, 22 skipped`.
-- CI `e2e` job (compose stack + same `exec app python -m pytest tests/e2e/` as the deploy script): see PR.
+- CI `e2e` job (compose stack + same `exec app python -m pytest tests/e2e/` as the deploy script): green on `main` `b6a0092`, run 39458603486, `22 passed`, 72 screenshots.
 
 ## Category Checklists
 
@@ -61,3 +61,5 @@ See `.claude/skills/ui-playwright/SKILL.md` (Run it).
 ## STOP
 
 Stop when the suite and CI artifact are green, or record the failing workflow step with its screenshot.
+
+Remaining: the last AC needs one owner-approved `local-pipeline.yml` run with `run_browser_uat: true` to dev or UAT (never `promote_prod`, see Issue 0035). Then tick it with the run URL and set `Status: done`.
