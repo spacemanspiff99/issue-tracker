@@ -53,13 +53,16 @@ volumeBindingMode: WaitForFirstConsumer
 YAML
 
 # Owner actions, with throwaway values.
-kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$ns" create secret generic issue-tracker-db \
-  --from-literal=POSTGRES_USER=issue_tracker --from-literal=POSTGRES_DB=issue_tracker \
-  --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$ns" create secret generic issue-tracker-app \
-  --from-literal=APP_SECRET_KEY="$(openssl rand -hex 32)" \
-  --from-literal=ADMIN_INITIAL_PASSWORD=ci-e2e-password --dry-run=client -o yaml | kubectl apply -f -
+owner_setup() {
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$ns" create secret generic issue-tracker-db \
+    --from-literal=POSTGRES_USER=issue_tracker --from-literal=POSTGRES_DB=issue_tracker \
+    --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 24)" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$ns" create secret generic issue-tracker-app \
+    --from-literal=APP_SECRET_KEY="$(openssl rand -hex 32)" \
+    --from-literal=ADMIN_INITIAL_PASSWORD=ci-e2e-password --dry-run=client -o yaml | kubectl apply -f -
+}
+owner_setup
 
 echo "== deploy refuses the wrong kubectl context"
 expect_fail "context mismatch" env EXPECTED_CONTEXT=issue-tracker-uat "$here/deploy.sh" uat "$image" "$sha"
@@ -227,6 +230,51 @@ kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 pvc_sh fix-backups 'rm /backups/pre-migration && mv /backups/pre-migration.saved /backups/pre-migration'
 echo "ok: failed backup -> no migration, old app back"
 
+echo "== migrate Job times out, Jobs deleted, version unchanged -> old app back (NB5)"
+# A memory quota that admits the backup pod (Postgres 256Mi + backup 64Mi) but not the migrate
+# pod (+128Mi), so the migration never starts and times out. alembic_version stays readable.
+version="$(psql_pg 'select version_num from alembic_version')"
+kubectl -n "$ns" apply -f - <<'YAML'
+apiVersion: v1
+kind: ResourceQuota
+metadata: {name: block-migrate}
+spec:
+  hard: {requests.memory: 320Mi}
+YAML
+for _ in $(seq 1 60); do
+  [ -n "$(kubectl -n "$ns" get resourcequota block-migrate -o jsonpath='{.status.used.requests\.memory}')" ] && break
+  sleep 1
+done
+nb5_log="$(mktemp)"
+if DEPLOY_TIMEOUT_SECONDS=60 "$here/deploy.sh" uat "$image" "$sha" > "$nb5_log" 2>&1; then
+  cat "$nb5_log"; kubectl -n "$ns" delete resourcequota block-migrate
+  echo "deploy succeeded although the migrate pod was blocked" >&2; exit 1
+fi
+cat "$nb5_log"
+kubectl -n "$ns" delete resourcequota block-migrate
+grep -q '^deploy failed during: migrate$' "$nb5_log"
+grep -q "job issue-tracker-backup-predeploy complete" "$nb5_log"
+grep -q 'Jobs deleted and alembic_version unchanged.*restoring the previous app (replicas=1)' "$nb5_log"
+[ -z "$(kubectl -n "$ns" get job issue-tracker-migrate --ignore-not-found -o name)" ] || { echo "migrate Job survived" >&2; exit 1; }
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 1 ]
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+[ "$(psql_pg 'select version_num from alembic_version')" = "$version" ]
+echo "ok: migrate timed out -> Jobs deleted, alembic_version still $version, old app scaled back up"
+
+echo "== restore aborts before the safety dump when the app can't be stopped (NB1)"
+# An app pod that ignores deletion: a finalizer keeps it Terminating past the 120s wait.
+app_pod="$(kubectl -n "$ns" get pod -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.name}')"
+kubectl -n "$ns" patch pod "$app_pod" --type=merge -p '{"metadata":{"finalizers":["example.com/hold"]}}'
+safety_before="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o name | wc -l)"
+expect_fail "restore while the app pod won't stop" env CONFIRM="$ns" "$here/restore.sh" uat "$head_dump"
+[ "$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o name | wc -l)" = "$safety_before" ] \
+  || { echo "restore Job started although the app did not stop" >&2; exit 1; }
+kubectl -n "$ns" patch pod "$app_pod" --type=merge -p '{"metadata":{"finalizers":null}}'
+kubectl -n "$ns" wait --for=delete "pod/$app_pod" --timeout=120s
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+echo "ok: restore aborted before any restore Job when the app pod would not stop"
+
 echo "== storage"
 kubectl get pvc -n "$ns" -o custom-columns=NAME:.metadata.name,REQUEST:.spec.resources.requests.storage,CLASS:.spec.storageClassName,STATUS:.status.phase
 
@@ -243,6 +291,11 @@ psql_pg 'drop schema public cascade; create schema public' > /dev/null
 CONFIRM="$ns" "$here/restore.sh" uat "$head_dump" --require-empty
 [ -n "$(psql_pg 'select version_num from alembic_version')" ]
 echo "ok: --require-empty passed with no projects table; schema restored at $(psql_pg 'select version_num from alembic_version')"
+# The app was at 0 before that restore, so it stays at 0 (B1, round 3); bring it back for e2e.
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
+  || { echo "restore scaled up an app that was at 0" >&2; exit 1; }
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 
 echo "== every restore wrote a readable safety dump first (NB3)"
 "$here/backup-files.sh" uat list | tee "$deploy_log.list"
@@ -309,4 +362,23 @@ kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 kubectl -n "$ns" exec deploy/issue-tracker -c app -- python -c \
   "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert d['database'] == 'ok', d; print(d)"
+echo "== first deploy into a FRESH namespace and volume, 3 times (Postgres init race)"
+# On a new volume the image's entrypoint runs a temporary socket-only server before CREATE
+# DATABASE; deploy.sh must wait for the real server over TCP instead of racing it.
+for i in 1 2 3; do
+  kubectl delete namespace "$ns" --wait=true --timeout=300s
+  pv_deadline=$((SECONDS + 120))
+  until [ -z "$(kubectl get pv -o jsonpath="{range .items[?(@.spec.claimRef.namespace=='$ns')]}{.metadata.name}{end}")" ]; do
+    (( SECONDS < pv_deadline )) || { kubectl get pv >&2; echo "old PVs for $ns not released within 120s" >&2; exit 1; }
+    sleep 2
+  done
+  owner_setup
+  fresh_log="$(mktemp)"
+  "$here/deploy.sh" uat "$image" "$sha" > "$fresh_log" 2>&1 || { cat "$fresh_log"; echo "fresh deploy $i failed" >&2; exit 1; }
+  grep -E '^(postgres: accepting connections|alembic_version before deploy|health:)' "$fresh_log"
+  grep -q '^alembic_version before deploy: (none)$' "$fresh_log"
+  grep -q '"database":"ok"' "$fresh_log"
+  echo "ok: fresh deploy $i"
+done
+
 echo "kind smoke passed"
