@@ -87,7 +87,7 @@ containers, never as a documented user-facing path.
 | Any visible UI change, writing UI acceptance criteria, or claiming a UI works | `ui-playwright` |
 | Touching `deployment/`, compose, Dockerfile, workflows, env vars, backups, or running a deploy | `deploy-safety` |
 | Writing/closing an issue, sprint, or prompt in `documentation/`, or updating `ISSUE_LOG.md` | `tracker-docs` |
-| About to claim "ready for UAT"/release-ready, or running sprint 0007/0008 work | `uat-gate` |
+| About to claim "ready for UAT"/release-ready, or running sprint 0007/0035 work | `uat-gate` |
 | Editing `CLAUDE.md` or anything under `.claude/` | `guidance-change` |
 
 Recurring-bug categories `IT-1`..`IT-6` and their checklists: `documentation/standards/ISSUE_LOG.md`.
