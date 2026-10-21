@@ -1,4 +1,4 @@
-# Issue 0035: Document "Closed Issues Cannot Join A Sprint" In Tracker Guidance
+# Issue 0037: Document "Closed Issues Cannot Join A Sprint" In Tracker Guidance
 
 Status: backlog
 Recommended model: claude-opus-5-5 medium
