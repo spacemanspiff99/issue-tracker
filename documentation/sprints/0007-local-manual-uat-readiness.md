@@ -68,4 +68,4 @@ Do not expand this sprint into production deployment, GitHub issue sync, multi-u
 
 ## Production Readiness
 
-Orchestrator prompt for sub-session execution of this sprint through production on `192.168.10.8`: [`../prompts/0016-production-readiness-orchestrator.md`](../prompts/0016-production-readiness-orchestrator.md).
+Historical orchestrator prompt for this sprint (its `192.168.10.8` release steps are superseded; production is k3s, see `../guides/k3s.md`): [`../prompts/0016-production-readiness-orchestrator.md`](../prompts/0016-production-readiness-orchestrator.md).

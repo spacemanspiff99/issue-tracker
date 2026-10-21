@@ -1,10 +1,16 @@
 # Deployment Guide
 
-**UAT and production run on the home-lab k3s cluster: see [`k3s.md`](k3s.md)** (namespaces
-`issue-tracker-uat` and `issue-tracker`, pipeline `.github/workflows/k3s-pipeline.yml`, issue 0020).
-Docker Compose below is for local development only, plus the legacy Compose hosts until the owner
-completes the k3s cutover in `k3s.md` (step 12); after that, do not use `local-pipeline.yml` for
-UAT or production.
+| Environment | Where | How |
+| --- | --- | --- |
+| **Production** | k3s namespace `issue-tracker` | `.github/workflows/k3s-pipeline.yml`, see [`k3s.md`](k3s.md) |
+| **UAT** | k3s namespace `issue-tracker-uat` | `.github/workflows/k3s-pipeline.yml`, see [`k3s.md`](k3s.md) |
+| Dev | Docker Compose, `192.168.10.20` / your machine | `deployment/docker-compose.local.yml`, `local-pipeline.yml` |
+
+**The Compose production path on `192.168.10.8` is retired** (Issue 0038): no workflow deploys
+there and nothing here documents one. Moving any data still on `.8` into k3s production is the
+owner's cutover in [`k3s.md`](k3s.md) step 12 (dump first, `restore.sh --require-empty`).
+Docker Compose below is for local development and the dev host only, plus the legacy Compose UAT
+host until the owner finishes that cutover; release UAT is k3s `issue-tracker-uat`.
 
 Use `deployment/docker-compose.app.yml` when PostgreSQL is external. Provide environment variables through your deployment system or an uncommitted `.env` file.
 
@@ -56,26 +62,25 @@ The local runner pipeline creates a compressed custom-format `pg_dump` before mi
 
 Restore is intentionally manual. Inspect the target and use PostgreSQL tools such as `pg_restore` from a known-good backup; do not add automatic restore or rollback that could overwrite live data without human approval.
 
-## Legacy: Local Runner Dev -> UAT -> Production Compose Pipeline (until k3s cutover)
+## Local Runner Compose Pipeline (dev + legacy UAT)
 
-Use `.github/workflows/local-pipeline.yml` for the local network pipeline:
+`.github/workflows/local-pipeline.yml` has no production job and no production inputs. It:
 
-1. Verify the current self-hosted runner checkout with Docker build, Alembic, tests, MCP smoke, and ruff.
-2. Deploy the verified source tree to UAT at `akun@192.168.10.18`.
-3. Run UAT health, MCP smoke, and browser UAT on the UAT host.
-4. Optionally deploy the same SHA to **PRODUCTION** at `akun@192.168.10.8` (home-lab production; holds the real tracker data).
+1. Verifies the current self-hosted runner checkout on the dev host with Docker build, Alembic, tests, MCP smoke, and ruff.
+2. Deploys the verified source tree to the legacy Compose UAT host at `akun@192.168.10.18`.
+3. Runs UAT health, MCP smoke, and browser UAT on that host.
 
-Hosts: dev `192.168.10.20`, UAT `192.168.10.18`, **production `192.168.10.8`**.
+Hosts: dev `192.168.10.20`, legacy Compose UAT `192.168.10.18`. For production use
+`k3s-pipeline.yml` ([`k3s.md`](k3s.md)); after the k3s cutover, do not use `local-pipeline.yml`
+for UAT either.
 
-The `Deploy Production` job (`deploy-prod`, `environment: prod`) runs only when `promote_prod` is `true` and `Deploy UAT` succeeded in the same run. It refuses to deploy if its checkout SHA differs from the SHA UAT deployed. It always takes a `pg_dump` before `alembic upgrade head`: the deploy script refuses `SKIP_DB_BACKUP=1` when `DEPLOY_ENV` is `uat` or `prod`. Every deploy fails unless `/health` returns `"database": "ok"`.
+The UAT job always takes a `pg_dump` before `alembic upgrade head`: the deploy script refuses `SKIP_DB_BACKUP=1` when `DEPLOY_ENV` is `uat` or `prod`. Every deploy fails unless `/health` returns `"database": "ok"`.
 
-Owner action: in GitHub **Settings -> Environments**, create `prod` with a required reviewer so every production deploy waits for explicit approval.
-
-The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker` and `local-dev`. The runner acts as an orchestrator and SSHes into the current dev host, UAT host, and production host; Docker does not need to be installed inside the runner LXC.
+The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker` and `local-dev`. The runner acts as an orchestrator and SSHes into the dev and UAT hosts; Docker does not need to be installed inside the runner LXC.
 
 Runner-local SSH prerequisites:
 
-- The runner's existing `github` user SSH configuration can connect non-interactively to `akun@192.168.10.20`, `akun@192.168.10.18`, and `akun@192.168.10.8`.
+- The runner's existing `github` user SSH configuration can connect non-interactively to `akun@192.168.10.20` and `akun@192.168.10.18`.
 - Do not write issue-tracker-specific keys or config into `/home/github/.ssh/config`; that user is shared by other local repo runners.
 
 Target host prerequisites:
@@ -100,15 +105,13 @@ Pre-migration database dumps are written on the target host under:
 
 Run it from GitHub Actions with:
 
+- `current_dev_host`: `192.168.10.20`
 - `uat_host`: `192.168.10.18`
-- `prod_host`: `192.168.10.8` (production)
 - `deploy_user`: `akun`
 - `deploy_path`: `/home/akun/issue-tracker`
-- `promote_prod`: `false` for UAT-only, `true` to deploy to production after UAT passes (still waits for the `prod` environment reviewer)
 
-The remote app URLs are:
+The legacy Compose UAT URL is:
 
 ```text
-http://192.168.10.18:8000   # UAT
-http://192.168.10.8:8000    # production
+http://192.168.10.18:8000   # legacy Compose UAT
 ```

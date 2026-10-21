@@ -286,9 +286,10 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    `expected_image: <the rehearsal digest>`. Both deploy jobs refuse if this run would deploy any
    other digest; that happens only if `main` moved since the rehearsal, because an
    already-pushed SHA is never rebuilt. If it refuses, rehearse again on the new commit (step 12b)
-   rather than skipping the check. Production backs up the restored data and migrates it forward. Check projects and issues in the UI, then switch DNS and bookmarks. Leave
-   the Compose stack stopped, not removed, until you are satisfied. After cutover, disable the
-   Compose production job in `local-pipeline.yml` (tracked as issue 0038).
+   rather than skipping the check. Production backs up the restored data and migrates it forward.
+   Check projects and issues in the UI, then switch DNS and bookmarks. Leave the Compose stack
+   stopped, not removed, until you are satisfied. (`local-pipeline.yml` has no production job
+   since issue 0038, so nothing can deploy to `.8` again.)
 
 ## What a deploy does (`deploy.sh <uat|prod> <image@sha256:...> <sha>`)
 
