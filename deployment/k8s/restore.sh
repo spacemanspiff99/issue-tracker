@@ -45,23 +45,38 @@ for job in issue-tracker-backup-predeploy issue-tracker-migrate; do
 done
 active="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o jsonpath='{range .items[*]}{.status.active}{end}')"
 [ -z "$active" ] || { echo "refusing: another restore Job is active in $ns" >&2; exit 1; }
+# Restore pods not yet Succeeded/Failed (a pod can outlive its Job, or be made by hand). Any one
+# may be using a pin in /backups/restoring, so none may be live when this restore's Job starts.
+live_restore_pods() {
+  kubectl -n "$ns" get pods -l app.kubernetes.io/component=restore \
+    -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase}{"\n"}{end}' \
+    | awk '$1 != "" && $2 != "Succeeded" && $2 != "Failed" {printf "%s ", $1}'
+}
+live="$(live_restore_pods)"
+[ -z "$live" ] || { echo "refusing: restore pod(s) still running in $ns without an active Job: $live" >&2; exit 1; }
 
-# The restore lock: `kubectl create` of a fixed-name ConfigMap is atomic, so two restore.sh runs
-# can never both hold it. It is released on exit, except while this run's Job may still be running.
+# The restore lock, shared with deploy.sh: `kubectl create` of a fixed-name ConfigMap is atomic, so
+# no two restores (or a restore and a deploy) can both hold it. Released on exit, only by its holder
+# (data.job), and not while this run's Job may still be running.
 job="issue-tracker-restore-$(date -u +%Y%m%d%H%M%S)"
 lock=issue-tracker-restore-lock
 if ! kubectl -n "$ns" create configmap "$lock" --from-literal=job="$job" > /dev/null; then
-  echo "refusing: could not take the restore lock (ConfigMap $lock in $ns): another restore holds it, or the API failed." >&2
-  echo "If no restore is running (kubectl -n $ns get jobs,pods -l app.kubernetes.io/component=restore)," >&2
-  echo "a killed restore.sh left it behind: kubectl -n $ns delete configmap $lock" >&2
+  echo "refusing: could not take the restore lock (ConfigMap $lock in $ns): a restore or deploy holds it, or the API failed." >&2
+  echo "If none is running (kubectl -n $ns get jobs,pods), a killed restore.sh or deploy.sh left it behind:" >&2
+  echo "kubectl -n $ns get configmap $lock -o jsonpath='{.data.job}'; kubectl -n $ns delete configmap $lock" >&2
   exit 1
 fi
 job_may_run=0
 release_lock() {
+  local holder
   if [ "$job_may_run" = 1 ]; then
     echo "restore lock kept: Job $job may still be running. When it has finished or is gone: kubectl -n $ns delete configmap $lock" >&2
-  elif ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then
-    echo "could not release the restore lock; once no restore is running: kubectl -n $ns delete configmap $lock" >&2
+  elif ! holder="$(kubectl -n "$ns" get configmap "$lock" --ignore-not-found -o jsonpath='{.data.job}')"; then
+    echo "could not read the restore lock, so it was not released; once nothing is running: kubectl -n $ns delete configmap $lock" >&2
+  elif [ -n "$holder" ] && [ "$holder" != "$job" ]; then
+    echo "the restore lock is now held by '$holder', not by this run ($job); leaving it" >&2
+  elif [ -n "$holder" ] && ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then
+    echo "could not release the restore lock; once nothing is running: kubectl -n $ns delete configmap $lock" >&2
   fi
 }
 trap release_lock EXIT
@@ -125,10 +140,13 @@ if [ -n "$active" ]; then
   echo "Check: kubectl -n $ns get jobs -l app.kubernetes.io/component=restore; then see documentation/guides/k3s.md, Found the app at 0 replicas." >&2
   exit 1
 fi
-# Pins of restore pods still running (or about to) are kept by the Job's stale-pin cleanup.
-keep_pins="$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=restore \
-  -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase}{"\n"}{end}' \
-  | awk '$1 != "" && $2 != "Succeeded" && $2 != "Failed" {printf "%s ", $1}')"
+# No restore pod may be live either: the Job removes every pin in /backups/restoring but its own.
+live="$(live_restore_pods)"
+if [ -n "$live" ]; then
+  echo "refusing: restore pod(s) started in $ns while this one was stopping the app: $live; app left at 0." >&2
+  echo "Check: kubectl -n $ns get pods -l app.kubernetes.io/component=restore; then see documentation/guides/k3s.md, Found the app at 0 replicas." >&2
+  exit 1
+fi
 job_may_run=1
 kubectl -n "$ns" create -f - <<YAML
 apiVersion: batch/v1
@@ -162,7 +180,6 @@ spec:
             - {name: DUMP, value: "$dump"}
             - {name: REQUIRE_EMPTY, value: "$require_empty"}
             - {name: RESTORE_TEST_DELAY_SECONDS, value: "$test_delay"}
-            - {name: KEEP_PINS, value: "$keep_pins"}
           volumeMounts:
             - {name: backups, mountPath: /backups}
             - {name: scripts, mountPath: /scripts, readOnly: true}
@@ -228,14 +245,14 @@ if [ "$status" = failed ]; then
     # --keep-app-down keeps it at 0).
     if [ "$has_app" = 1 ] && [ "$restore_app_to" -ge 1 ]; then
       kubectl -n "$ns" scale deployment/issue-tracker --replicas="$restore_app_to"
-      echo "restore failed before COMMIT; the database is unchanged (transaction rolled back); app back to $restore_app_to replica(s)" >&2
+      echo "restore failed before COMMIT; revision unchanged (${v_before}); app back to $restore_app_to replica(s)" >&2
     else
-      echo "restore failed before COMMIT; the database is unchanged (transaction rolled back); app left at 0" >&2
+      echo "restore failed before COMMIT; revision unchanged (${v_before}); app left at 0" >&2
       [ "$has_app" = 1 ] && echo "To bring it back: kubectl -n $ns scale deployment/issue-tracker --replicas=$advise_replicas" >&2
     fi
   else
     echo "restore Job $job failed; committed=$committed, alembic_version before '${v_before:-unknown}', after the failure '${v_failed:-unknown}'." >&2
-    echo "It is not proven that the database is unchanged, so the app is left at 0." >&2
+    echo "It is not proven that the revision is unchanged, so the app is left at 0." >&2
     echo "Check: kubectl -n $ns logs job/$job; alembic_version and project count, then scale up as in" >&2
     echo "documentation/guides/k3s.md, Found the app at 0 replicas." >&2
   fi

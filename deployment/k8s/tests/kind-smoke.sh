@@ -81,6 +81,15 @@ grep -q '^maintenance: app scaled to 0 for backup + migrate$' "$deploy_log"
 [ "$(kubectl -n "$ns" get pod -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.uid}')" != "$app_pod" ] \
   || { echo "app pod survived the maintenance window" >&2; exit 1; }
 echo "ok: app was scaled to 0 for backup + migrate and came back"
+# 0048 #3: deploy.sh holds the shared restore lock while it runs and releases it at the end.
+[ -z "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
+  || { echo "deploy did not release the restore lock" >&2; exit 1; }
+kubectl -n "$ns" create configmap issue-tracker-restore-lock --from-literal=job=held-by-test
+expect_fail "deploy while the restore lock is held" "$here/deploy.sh" uat "$image" "$sha"
+[ "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock -o jsonpath='{.data.job}')" = held-by-test ] \
+  || { echo "a refused deploy touched a lock it didn't hold" >&2; exit 1; }
+kubectl -n "$ns" delete configmap issue-tracker-restore-lock
+echo "ok: deploy refused while the restore lock was held; lock left to its holder"
 head_dump="$(grep -o '/backups/pre-migration/[^ ]*\.dump' "$deploy_log" | sed -n 1p)"
 [ "$(kubectl -n "$ns" get pod issue-tracker-postgres-0 -o jsonpath='{.metadata.uid}')" = "$pg_uid" ] \
   || { echo "Postgres pod was replaced by a no-op redeploy" >&2; exit 1; }
@@ -298,13 +307,22 @@ expect_fail "restore while the restore lock is held" env CONFIRM="$ns" "$here/re
 kubectl -n "$ns" delete configmap issue-tracker-restore-lock
 echo "ok: restore refused while the lock was held; lock and app untouched"
 
-echo "== restore that changes alembic_version leaves the app at 0; leaked pin cleared (0042 N1, N2; 0047 N-2)"
-# A pin leaked by a SIGKILLed restore Job (bash as PID 1 ignores SIGTERM, so its EXIT trap never ran),
-# and the pin of a restore pod that is still running (a bare pod, so no restore Job is active).
-pvc_sh plant-stale-pin "mkdir -p /backups/restoring && ln $head_dump /backups/restoring/killed-pod.dump && ln $head_dump /backups/restoring/fake-running-restore.dump"
+echo "== restore refused while a restore pod is live without a Job (0048 #1)"
+# A bare pod labelled component=restore: no restore Job is active, but the pod may hold a pin.
 kubectl -n "$ns" run fake-running-restore --image=postgres:16.15 --restart=Never \
   --labels=app.kubernetes.io/name=issue-tracker,app.kubernetes.io/component=restore -- sleep 600
 kubectl -n "$ns" wait --for=condition=Ready pod/fake-running-restore --timeout=180s
+expect_fail "restore while a restore pod is live" env CONFIRM="$ns" "$here/restore.sh" uat "$head_dump"
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 1 ] \
+  || { echo "a refused restore touched the app" >&2; exit 1; }
+[ -z "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
+  || { echo "a refused restore left a lock" >&2; exit 1; }
+kubectl -n "$ns" delete pod fake-running-restore --wait=true
+echo "ok: restore refused while a restore pod was live; app and lock untouched"
+
+echo "== restore that changes alembic_version leaves the app at 0; leaked pins cleared (0042 N1, N2)"
+# Pins leaked by SIGKILLed restore Jobs (bash as PID 1 ignores SIGTERM, so the EXIT trap never ran).
+pvc_sh plant-stale-pin "mkdir -p /backups/restoring && ln $head_dump /backups/restoring/killed-pod.dump && ln $head_dump /backups/restoring/killed-pod-2.dump"
 # The live schema reads as another revision than the dump's, as after a deploy migrated past it.
 psql_pg "update alembic_version set version_num = '0003_fake_other'" > /dev/null
 n1_log="$(mktemp)"
@@ -314,15 +332,14 @@ fi
 cat "$n1_log"
 grep -q "alembic_version went from '0003_fake_other' to '" "$n1_log"
 grep -q "removed '/backups/restoring/killed-pod.dump'" "$n1_log"
-grep -q "keeping pin of running restore pod fake-running-restore" "$n1_log"
+grep -q "removed '/backups/restoring/killed-pod-2.dump'" "$n1_log"
 [ -z "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
   || { echo "restore did not release its lock" >&2; exit 1; }
 [ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
   || { echo "restore across revisions scaled the app up" >&2; exit 1; }
 [ "$(psql_pg 'select version_num from alembic_version')" != 0003_fake_other ]
-pvc_sh check-pins '[ "$(ls -A /backups/restoring)" = fake-running-restore.dump ] && rm /backups/restoring/fake-running-restore.dump'
-kubectl -n "$ns" delete pod fake-running-restore --wait=true
-echo "ok: app left at 0 after a restore that changed alembic_version; leaked pin removed, running pod's pin kept, lock released"
+pvc_sh check-no-pins 'test -z "$(ls -A /backups/restoring)"'
+echo "ok: app left at 0 after a restore that changed alembic_version; leaked pins removed, lock released"
 
 echo "== restore --require-empty passes when projects is ABSENT (NB2)"
 kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
