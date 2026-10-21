@@ -39,7 +39,7 @@ spec:
         fsGroup: 999
       containers:
         - name: postgres
-          image: postgres:16
+          image: postgres:16.15
           # WAL capped per the Storage Sizing table in documentation/issues/0020-k3s-deployment.md.
           args:
             - -c

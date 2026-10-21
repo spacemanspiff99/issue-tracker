@@ -140,6 +140,13 @@ jobs:
             # Backup and migrate share one exact backup path.
             test "$(grep -A1 'name: BACKUP_FILE' "$out/jobs.yaml" | grep -o '/backups/[^ ]*' | sort -u | wc -l)" = 1
           done
+      - name: Pipeline ref and digest gates
+        run: python3 -m pip install -q pyyaml && python3 deployment/k8s/tests/pipeline-gates.py
+      - name: Postgres images pinned to a minor version
+        run: |
+          if grep -rnE 'image: *postgres(:16)?( |$)|postgres:16([^.0-9]|$)' deployment/k8s; then
+            echo "unpinned postgres image in deployment/k8s" >&2; exit 1
+          fi
       - name: deploy.sh refuses bad inputs
         run: |
           for args in "staging img:tag ${{ github.sha }}" "uat img-without-tag ${{ github.sha }}" "uat img:tag not-a-sha" "uat img@sha256:short ${{ github.sha }}"; do
@@ -162,8 +169,8 @@ jobs:
       - name: Create kind cluster
         run: |
           kind create cluster --name it-ci --wait 180s
-          docker pull postgres:16
-          kind load docker-image --name it-ci "$IMAGE" postgres:16
+          docker pull postgres:16.15
+          kind load docker-image --name it-ci "$IMAGE" postgres:16.15
       - name: Deploy uat overlay (backup -> migrate -> rollout -> /health -> e2e)
         run: bash deployment/k8s/tests/kind-smoke.sh "$IMAGE" "${{ github.sha }}"
       - name: Upload e2e screenshots

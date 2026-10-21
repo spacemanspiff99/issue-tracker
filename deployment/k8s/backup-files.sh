@@ -4,7 +4,7 @@
 # Usage:
 #   deployment/k8s/backup-files.sh <uat|prod> list
 #   deployment/k8s/backup-files.sh <uat|prod> get <remote path under /backups> <local dir>
-#   deployment/k8s/backup-files.sh <uat|prod> get-latest <local dir>    # newest daily + pre-migration
+#   deployment/k8s/backup-files.sh <uat|prod> get-latest <local dir>    # newest daily, pre-migration, pre-restore
 #   deployment/k8s/backup-files.sh <uat|prod> put <local file> <name>   # lands in /backups/imports/<name>
 set -euo pipefail
 env_name="${1:?usage: backup-files.sh <uat|prod> <list|get|get-latest|put> ...}"
@@ -31,7 +31,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: files
-      image: postgres:16
+      image: postgres:16.15
       command: ["sleep", "1800"]
       volumeMounts: [{name: backups, mountPath: /backups, readOnly: $read_only}]
   volumes:
@@ -52,7 +52,7 @@ case "$action" in
   list) kubectl -n "$ns" exec "$pod" -- sh -c 'ls -lt /backups/* 2>/dev/null; df -h /backups' ;;
   get) fetch "${3:?remote path}" "${4:?local dir}" ;;
   get-latest)
-    for d in daily pre-migration; do
+    for d in daily pre-migration pre-restore; do
       f="$(kubectl -n "$ns" exec "$pod" -- sh -c "ls -1t /backups/$d/*.dump 2>/dev/null | head -1")"
       if [ -n "$f" ]; then fetch "$f" "${3:?local dir}"; else echo "no $d dumps yet"; fi
     done ;;

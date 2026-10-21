@@ -1,4 +1,8 @@
-name: Local Dev UAT Production Pipeline
+name: Local Compose Dev UAT Pipeline
+
+# Compose dev verify plus the legacy Compose UAT host. No production job: production is k3s
+# namespace `issue-tracker`, deployed only by k3s-pipeline.yml (documentation/guides/k3s.md).
+# The Compose production path on 192.168.10.8 is retired (Issue 0038).
 
 on:
   workflow_dispatch:
@@ -8,13 +12,9 @@ on:
         required: true
         default: 192.168.10.20
       uat_host:
-        description: UAT host
+        description: Legacy Compose UAT host (release UAT is k3s issue-tracker-uat)
         required: true
         default: 192.168.10.18
-      prod_host:
-        description: PRODUCTION host (home-lab production, holds real tracker data)
-        required: true
-        default: 192.168.10.8
       deploy_user:
         description: SSH user on target hosts
         required: true
@@ -23,17 +23,12 @@ on:
         description: Remote deployment path
         required: true
         default: /home/akun/issue-tracker
-      promote_prod:
-        description: Deploy to PRODUCTION after UAT passes on the same SHA
-        required: true
-        type: boolean
-        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: local-dev-uat-prod
+  group: local-dev-uat
   cancel-in-progress: false
 
 jobs:
@@ -61,8 +56,6 @@ jobs:
     runs-on: [self-hosted, issue-tracker, local-dev]
     needs: verify-current-dev
     environment: uat
-    outputs:
-      sha: ${{ steps.deployed.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
       - name: Deploy to UAT
@@ -74,38 +67,5 @@ jobs:
           APP_BASE_URL: http://${{ inputs.uat_host }}:8000
           APP_HTTP_PORT: "8000"
           RUN_BROWSER_UAT: "1"
-          SKIP_DB_BACKUP: "0"
-        run: bash deployment/scripts/remote-compose-deploy.sh
-      - name: Record UAT SHA
-        id: deployed
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  deploy-prod:
-    name: Deploy Production
-    runs-on: [self-hosted, issue-tracker, local-dev]
-    needs: deploy-uat
-    if: ${{ inputs.promote_prod && needs.deploy-uat.result == 'success' }}
-    # Owner configures the `prod` environment in GitHub with a required reviewer.
-    environment: prod
-    steps:
-      - uses: actions/checkout@v4
-      - name: Require UAT green on this SHA
-        env:
-          UAT_SHA: ${{ needs.deploy-uat.outputs.sha }}
-        run: |
-          prod_sha="$(git rev-parse HEAD)"
-          if [ -z "$UAT_SHA" ] || [ "$UAT_SHA" != "$prod_sha" ]; then
-            echo "Refusing production deploy: UAT SHA '$UAT_SHA' != production SHA '$prod_sha'" >&2
-            exit 1
-          fi
-      - name: Deploy to PRODUCTION
-        env:
-          DEPLOY_ENV: prod
-          TARGET_HOST: ${{ inputs.prod_host }}
-          TARGET_USER: ${{ inputs.deploy_user }}
-          DEPLOY_PATH: ${{ inputs.deploy_path }}
-          APP_BASE_URL: http://${{ inputs.prod_host }}:8000
-          APP_HTTP_PORT: "8000"
-          RUN_BROWSER_UAT: "0"
           SKIP_DB_BACKUP: "0"
         run: bash deployment/scripts/remote-compose-deploy.sh
