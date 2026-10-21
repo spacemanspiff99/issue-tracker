@@ -22,7 +22,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: pg-dump
-              image: postgres:16
+              image: postgres:16.15
               envFrom:
                 - secretRef:
                     name: issue-tracker-db
@@ -34,7 +34,7 @@ spec:
                     secretKeyRef:
                       name: issue-tracker-db
                       key: POSTGRES_PASSWORD
-              # Retention: 14 daily dumps + the 5 newest pre-migration dumps; older ones are pruned.
+              # Retention: 14 daily dumps + the 5 newest pre-migration and pre-restore dumps.
               command:
                 - sh
                 - -euc
@@ -48,6 +48,7 @@ spec:
                   echo "wrote $f ($(du -h "$f" | cut -f1))"
                   ls -1t /backups/daily/*.dump | tail -n +15 | xargs -r rm -fv
                   ls -1t /backups/pre-migration/*.dump 2>/dev/null | tail -n +6 | xargs -r rm -fv
+                  ls -1t /backups/pre-restore/*.dump 2>/dev/null | tail -n +6 | xargs -r rm -fv
                   df -h /backups
               resources:
                 requests:

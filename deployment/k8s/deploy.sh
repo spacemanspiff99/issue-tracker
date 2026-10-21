@@ -97,7 +97,7 @@ wait_job() {
 kubectl -n "$ns" get secret issue-tracker-db issue-tracker-app > /dev/null
 kubectl -n "$ns" get secret ghcr-pull > /dev/null 2>&1 || echo "warning: secret ghcr-pull missing in $ns; private GHCR pulls will fail" >&2
 
-# Never start while a previous backup or migration is still running.
+# Never start while a previous backup, migration or restore is still running.
 for job in issue-tracker-backup-predeploy issue-tracker-migrate; do
   active="$(kubectl -n "$ns" get job "$job" -o jsonpath='{.status.active}' 2> /dev/null || true)"
   if [ "${active:-0}" -ge 1 ]; then
@@ -105,21 +105,91 @@ for job in issue-tracker-backup-predeploy issue-tracker-migrate; do
     exit 1
   fi
 done
+restoring="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o jsonpath='{range .items[?(@.status.active)]}{.metadata.name} {end}')"
+if [ -n "$restoring" ]; then
+  echo "refusing: restore Job(s) still active in $ns: $restoring" >&2
+  exit 1
+fi
 
 # 1. Everything except the app Deployment/Service/Ingress (ConfigMap, Postgres, PVCs, CronJob).
 kubectl -n "$ns" apply -f "$tmp/app.yaml" -l 'app.kubernetes.io/component!=web'
 kubectl -n "$ns" rollout status statefulset/issue-tracker-postgres --timeout="${timeout}s"
 
+# alembic_version as one line ("" before the first migration). Non-zero exit on any error,
+# including when another session holds a lock on alembic_version (fail closed: unknown).
+db_version() {
+  kubectl -n "$ns" exec -i issue-tracker-postgres-0 -c postgres -- \
+    sh -c 'psql -X -q -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f -' <<'SQL'
+SET lock_timeout = '10s';
+SET statement_timeout = '20s';
+SELECT to_regclass('public.alembic_version') IS NOT NULL AS has_version \gset
+\if :has_version
+SELECT string_agg(version_num, ',') FROM alembic_version;
+\endif
+SQL
+}
+version_before="$(db_version)"
+echo "alembic_version before deploy: ${version_before:-(none)}"
+
+# Maintenance window: stop the app before the backup so no write lands after the dump, and so
+# the old code never runs against the migrated schema. On failure before rollout, on_failure
+# first deletes the backup/migrate Jobs (foreground, so their pods are gone and an uncommitted
+# migration can never COMMIT), then brings the old app back only if alembic_version is
+# provably unchanged. Otherwise the app stays at 0 and it says what to check.
+phase=""
+old_replicas="$(kubectl -n "$ns" get deployment issue-tracker --ignore-not-found -o jsonpath='{.spec.replicas}')"
+on_failure() {
+  local rc=$? left now
+  trap - EXIT INT TERM
+  set +e
+  [ "$rc" -ne 0 ] || rc=1
+  echo "deploy failed during: ${phase:-preflight}" >&2
+  kubectl -n "$ns" delete job issue-tracker-backup-predeploy issue-tracker-migrate \
+    --ignore-not-found --cascade=foreground --wait=true --timeout=180s >&2
+  left="$(kubectl -n "$ns" get job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found -o name 2>&1)"
+  now="$(db_version 2>&1)"
+  if [ "${old_replicas:-0}" -lt 1 ]; then
+    echo "the app was not running before this deploy; leaving it at 0" >&2
+  elif [ -n "$left" ]; then
+    echo "LEAVING THE APP AT 0: could not confirm the Jobs are gone ($left)." >&2
+    echo "Check: kubectl -n $ns get jobs,pods; then compare alembic_version with '${version_before:-(none)}'." >&2
+  elif [ "$now" != "$version_before" ]; then
+    echo "LEAVING THE APP AT 0: alembic_version is '$now', was '${version_before:-(none)}' (or could not be read)." >&2
+    echo "The migration may have committed, so the old image may not match the schema. Either re-run the" >&2
+    echo "pipeline to finish this deploy, or restore $backup_file (documentation/guides/k3s.md, Rollback)." >&2
+  else
+    echo "Jobs deleted and alembic_version unchanged (${now:-(none)}); restoring the previous app (replicas=$old_replicas)" >&2
+    kubectl -n "$ns" scale deployment/issue-tracker --replicas="$old_replicas" >&2
+  fi
+  rm -rf "$tmp"
+  exit "$rc"
+}
+trap on_failure EXIT
+trap 'exit 130' INT TERM
+
+if [ "${old_replicas:-0}" -ge 1 ]; then
+  phase="maintenance window"
+  kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
+  # Abort before the backup if the old pod is still running.
+  kubectl -n "$ns" wait --for=delete pod -l app.kubernetes.io/component=web --timeout="${timeout}s"
+  echo "maintenance: app scaled to 0 for backup + migrate"
+fi
+
 # 2. Pre-deploy backup. Job specs are immutable, so replace the previous run's Job.
+phase="backup"
 kubectl -n "$ns" delete job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found --wait=true
 kubectl -n "$ns" apply -f "$tmp/jobs.yaml" -l app.kubernetes.io/component=backup
 wait_job issue-tracker-backup-predeploy
 
 # 3. Forward-only migration (its init container re-checks $backup_file).
+phase="migrate"
 kubectl -n "$ns" apply -f "$tmp/jobs.yaml" -l app.kubernetes.io/component=migrate
 wait_job issue-tracker-migrate
 
-# 4. App rollout.
+# 4. App rollout (the manifest sets replicas back to 1). From here on the schema may be new,
+# so a failure no longer brings the old app back.
+trap - INT TERM
+trap 'rm -rf "$tmp"' EXIT
 kubectl -n "$ns" apply -f "$tmp/app.yaml"
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout="${timeout}s"
 

@@ -20,6 +20,15 @@ on:
         required: true
         type: boolean
         default: false
+      expected_image:
+        description: ghcr.io/...@sha256 digest this run must deploy; REQUIRED with promote_prod (the digest a UAT-only run verified)
+        required: false
+        default: ""
+      allow_non_main_uat:
+        description: Allow a UAT-only deploy from a branch other than main (production always requires main)
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -45,6 +54,24 @@ jobs:
     env:
       IMAGE: ${{ needs.image.outputs.image }}
     steps:
+      - name: Require main (or an explicit UAT-only override) and the expected digest
+        env:
+          REF: ${{ github.ref }}
+          ALLOW: ${{ inputs.allow_non_main_uat }}
+          PROMOTE: ${{ inputs.promote_prod }}
+          EXPECTED: ${{ inputs.expected_image }}
+        run: |
+          if [ "$REF" != refs/heads/main ]; then
+            if [ "$PROMOTE" = true ]; then echo "refusing: promote_prod requires refs/heads/main, got $REF" >&2; exit 1; fi
+            if [ "$ALLOW" != true ]; then echo "refusing: UAT deploys from main only (got $REF); set allow_non_main_uat to override" >&2; exit 1; fi
+            echo "warning: UAT-only deploy from $REF (allow_non_main_uat)"
+          fi
+          if [ "$PROMOTE" = true ] && [ -z "$EXPECTED" ]; then
+            echo "refusing: promote_prod requires expected_image (the digest from a UAT-only run)" >&2; exit 1
+          fi
+          if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$IMAGE" ]; then
+            echo "refusing: this run would deploy '$IMAGE', expected_image is '$EXPECTED'" >&2; exit 1
+          fi
       - uses: actions/checkout@v4
       - name: Write UAT kubeconfig
         env:
@@ -94,15 +121,22 @@ jobs:
     env:
       IMAGE: ${{ needs.image.outputs.image }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Require the image digest UAT verified
+      - name: Require main, the digest UAT verified, and the expected digest
         env:
+          REF: ${{ github.ref }}
           UAT_IMAGE: ${{ needs.deploy-uat.outputs.image }}
+          EXPECTED: ${{ inputs.expected_image }}
         run: |
+          # Enforced here as well as by the prod environment's branch rule.
+          [ "$REF" = refs/heads/main ] || { echo "refusing production deploy from $REF; main only" >&2; exit 1; }
           if [ -z "$UAT_IMAGE" ] || [ "$UAT_IMAGE" != "$IMAGE" ] || [[ "$IMAGE" != *@sha256:* ]]; then
             echo "Refusing production deploy: UAT ran '$UAT_IMAGE', production would run '$IMAGE'" >&2
             exit 1
           fi
+          if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$IMAGE" ]; then
+            echo "refusing: production would deploy '$IMAGE', expected_image is '${EXPECTED:-(empty)}'" >&2; exit 1
+          fi
+      - uses: actions/checkout@v4
       - name: Write production kubeconfig
         env:
           KCFG: ${{ secrets.K3S_KUBECONFIG }}

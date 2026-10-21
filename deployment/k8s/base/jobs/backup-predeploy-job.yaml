@@ -17,7 +17,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: pg-dump
-          image: postgres:16
+          image: postgres:16.15
           envFrom:
             - secretRef:
                 name: issue-tracker-db
