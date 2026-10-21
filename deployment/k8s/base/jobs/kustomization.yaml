@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# One-shot Jobs, applied by deploy.sh in this order: backup, then migrate.
+resources:
+  - backup-predeploy-job.yaml
+  - migrate-job.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: issue-tracker
+images:
+  - name: ghcr.io/spacemanspiff99/issue-tracker
+    newTag: set-by-deploy-script

@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: issue-tracker-backup-daily
+  labels:
+    app.kubernetes.io/name: issue-tracker
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "17 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: issue-tracker
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: pg-dump
+              image: postgres:16
+              envFrom:
+                - secretRef:
+                    name: issue-tracker-db
+              env:
+                - name: PGHOST
+                  value: issue-tracker-postgres
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: issue-tracker-db
+                      key: POSTGRES_PASSWORD
+              # Retention: 14 daily dumps + the 5 newest pre-migration dumps; older ones are pruned.
+              command:
+                - sh
+                - -euc
+                - |
+                  mkdir -p /backups/daily /backups/pre-migration
+                  rm -fv /backups/daily/*.partial
+                  f="/backups/daily/$(date -u +%Y%m%dT%H%M%SZ).dump"
+                  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$f.partial"
+                  pg_restore -l "$f.partial" > /dev/null
+                  mv "$f.partial" "$f"
+                  echo "wrote $f ($(du -h "$f" | cut -f1))"
+                  ls -1t /backups/daily/*.dump | tail -n +15 | xargs -r rm -fv
+                  ls -1t /backups/pre-migration/*.dump 2>/dev/null | tail -n +6 | xargs -r rm -fv
+                  df -h /backups
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: issue-tracker-backups
