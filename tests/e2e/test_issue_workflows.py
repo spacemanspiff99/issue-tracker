@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import re
 
-import pytest
 from e2e_support import Step, create_issue, create_project, unique
 from playwright.sync_api import Page, expect
-
-BUG_0019 = "issue 0019: web routes turn DomainError into 500 / miss close validation and metadata"
 
 
 def _issue_row(page: Page, title: str):
@@ -71,7 +68,6 @@ def test_dependency(user_page: Page, step: Step) -> None:
     step("dependency-shown-on-blocker")
 
 
-@pytest.mark.xfail(strict=True, reason=BUG_0019)
 def test_dependency_cycle_rejected(user_page: Page, step: Step) -> None:
     page = user_page
     project_id = create_project(page, unique("E2E Cycle"))
@@ -149,7 +145,6 @@ def test_close_issue(user_page: Page, step: Step) -> None:
     step("closed-issue-detail")
 
 
-@pytest.mark.xfail(strict=True, reason=BUG_0019)
 def test_close_issue_blank_llm_rejected(user_page: Page, step: Step) -> None:
     page = user_page
     project_id = create_project(page, unique("E2E Close blank"))
@@ -163,7 +158,6 @@ def test_close_issue_blank_llm_rejected(user_page: Page, step: Step) -> None:
     expect(page.get_by_text("Status: backlog")).to_be_visible()
 
 
-@pytest.mark.xfail(strict=True, reason=BUG_0019)
 def test_closed_issue_metadata_and_reopen_blocked(user_page: Page, step: Step) -> None:
     page = user_page
     project_id = create_project(page, unique("E2E Immutable"))

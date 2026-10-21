@@ -1,6 +1,6 @@
 # Issue 0019: Web Routes 500 On Domain Errors; Blank LLM Closes Issues; Close Metadata Hidden
 
-Status: backlog
+Status: done (merged in #12, a98b164)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-1`, `IT-5`
 Sprint: Sprint 0007
@@ -29,14 +29,14 @@ Evidence: CI `e2e` job artifact `e2e-screenshots`, folders `test_dependency_cycl
 
 ## Acceptance Criteria
 
-- [ ] W-DEPENDENCY (`tests/e2e/test_issue_workflows.py::test_dependency_cycle_rejected`): reverse edge →
+- [x] W-DEPENDENCY (`tests/e2e/test_issue_workflows.py::test_dependency_cycle_rejected`): reverse edge →
       inline "Dependency would create a cycle" on the issue page, no 500, no new edge.
-- [ ] W-ISSUE-CLOSE (`::test_close_issue_blank_llm_rejected`): whitespace LLM → inline
+- [x] W-ISSUE-CLOSE (`::test_close_issue_blank_llm_rejected`): whitespace LLM → inline
       "Originating LLM is required to close an issue", issue stays `backlog`.
-- [ ] W-ISSUE-CLOSE (`::test_closed_issue_metadata_and_reopen_blocked`): closed issue detail shows originating
+- [x] W-ISSUE-CLOSE (`::test_closed_issue_metadata_and_reopen_blocked`): closed issue detail shows originating
       LLM; re-close attempt → "Closed issue metadata is immutable" shown, metadata unchanged.
-- [ ] Every `DomainError` from a web route re-renders with an inline error (route tests per route).
-- [ ] `xfail` markers removed; `RUN_BROWSER_UAT=1 python -m pytest tests/e2e` fully green.
+- [x] Every `DomainError` from a web route re-renders with an inline error (route tests per route).
+- [x] `xfail` markers removed; `RUN_BROWSER_UAT=1 python -m pytest tests/e2e` fully green.
 
 ## Category Checklists
 
@@ -47,6 +47,21 @@ Evidence: CI `e2e` job artifact `e2e-screenshots`, folders `test_dependency_cycl
 ## Verification Commands
 
 `python -m ruff check . && python -m pytest -q tests`, then the `ui-playwright` run (§4).
+
+## Resolution
+
+- `IssueService.update_status` strips `originating_llm`/`closed_by`/`close_note`; a blank LLM raises before any
+  mutation. Any status change on a closed issue (including a second close) raises
+  "Closed issue metadata is immutable" instead of silently returning.
+- `web/app.py`: `render_projects`/`render_project`/`render_issue`/`render_sprint` helpers; every route that can
+  raise `DomainError` (create project, category, issue, sprint; close issue; add dependency; add sprint issue)
+  re-renders its page with status 400 and an inline `.error`. `close_sprint` raises no `DomainError`.
+- `issue_detail.html` shows originating LLM, closed by, closed at, close note once closed. The close form stays
+  on closed issues so a re-close attempt surfaces the immutable error; there is still no reopen control.
+- Tests: `tests/unit/test_services.py` (blank LLM, re-close), `tests/integration/test_web_routes.py` (one
+  DomainError case per route), xfail markers removed in `tests/e2e/test_issue_workflows.py`.
+- Evidence: `RUN_BROWSER_UAT=1 python -m pytest tests/e2e` → 22 passed on a migrated Postgres 16
+  (baseline on `680169a`: 16 passed, 6 xfailed); CI `e2e` artifact `e2e-screenshots` on the PR.
 
 ## STOP
 

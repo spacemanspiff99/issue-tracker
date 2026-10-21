@@ -3,6 +3,7 @@
 <p><a href="/projects/{{ sprint.project_id }}">Project</a></p>
 <h1>Sprint {{ display_id(sprint.sequence) }}: {{ sprint.goal }}</h1>
 <p>Status: {{ sprint.status.value }}</p>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
 <form method="post" action="/sprints/{{ sprint.id }}/issues" class="row">
   <label>Backlog issue
     <select name="issue_id">

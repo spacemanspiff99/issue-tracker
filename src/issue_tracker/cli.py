@@ -16,7 +16,8 @@ from issue_tracker.domain.models import (
     Sprint,
     SprintIssue,
 )
-from issue_tracker.services.tracker import CategoryService, IssueService, ProjectService
+from issue_tracker.markdown_import import import_markdown
+from issue_tracker.services.tracker import CategoryService, DomainError, IssueService, ProjectService
 
 
 def export_json(session: Session, project_id: int, output: Path) -> None:
@@ -120,6 +121,10 @@ def main() -> None:
     import_cmd.add_argument("input", type=Path)
     import_cmd.add_argument("project_name")
     import_cmd.add_argument("--category-map", action="append", default=[])
+    markdown_cmd = sub.add_parser("import-markdown", help="Seed a project from documentation/issues and sprints")
+    markdown_cmd.add_argument("--project", required=True)
+    markdown_cmd.add_argument("--root", type=Path, default=Path("."))
+    markdown_cmd.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     with SessionLocal() as session:
         if args.command == "export-json":
@@ -127,6 +132,15 @@ def main() -> None:
         elif args.command == "import-json":
             project_id = import_json(session, args.input, args.project_name, parse_mapping(args.category_map))
             print(project_id)
+        elif args.command == "import-markdown":
+            try:
+                report = import_markdown(session, args.root, args.project, dry_run=args.dry_run)
+            except DomainError as exc:
+                raise SystemExit(f"import-markdown: {exc}") from exc
+            for action in report.actions:
+                print(action)
+            prefix = "dry-run: would have " if args.dry_run else ""
+            print(f"{prefix}{report.created} created / {report.updated} updated / {report.unchanged} unchanged")
 
 
 if __name__ == "__main__":

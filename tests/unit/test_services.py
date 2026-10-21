@@ -52,6 +52,35 @@ def test_close_metadata_is_required_and_immutable(session):
         service.update_status(issue.id, "backlog")
 
 
+def test_blank_originating_llm_does_not_close(session):
+    project = ProjectService(session).create_project("Tracker")
+    service = IssueService(session)
+    issue = service.create_issue(project.id, "Close me", "- [ ] closed")
+
+    with pytest.raises(DomainError, match="Originating LLM is required"):
+        service.update_status(issue.id, "done", originating_llm="   ")
+    session.refresh(issue)
+    assert issue.status == IssueStatus.BACKLOG
+    assert issue.closed_at is None
+
+    closed = service.update_status(issue.id, "done", originating_llm="  gpt-5.5 ", close_note="  ")
+    assert closed.originating_llm == "gpt-5.5"
+    assert closed.close_note is None
+
+
+def test_reclosing_a_closed_issue_is_rejected(session):
+    project = ProjectService(session).create_project("Tracker")
+    service = IssueService(session)
+    issue = service.create_issue(project.id, "Close me", "- [ ] closed")
+    service.update_status(issue.id, "done", originating_llm="gpt-5.5", close_note="first")
+
+    with pytest.raises(DomainError, match="Closed issue metadata is immutable"):
+        service.update_status(issue.id, "done", originating_llm="other-llm", close_note="second")
+    session.refresh(issue)
+    assert issue.originating_llm == "gpt-5.5"
+    assert issue.close_note == "first"
+
+
 def test_categories_are_project_scoped_not_peer_taxonomy_constants(session):
     first = ProjectService(session).create_project("Tracker")
     second = ProjectService(session).create_project("Other")

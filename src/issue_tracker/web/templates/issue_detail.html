@@ -3,6 +3,7 @@
 <p><a href="/projects/{{ issue.project_id }}">Project</a></p>
 <h1>Issue {{ display_id(issue.sequence) }}: {{ issue.title }}</h1>
 <p>Status: {{ issue.status.value }}</p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <p>{{ issue.summary or "" }}</p>
 <h2>Acceptance criteria</h2>
 <pre>{{ issue.acceptance_criteria }}</pre>
@@ -17,6 +18,15 @@
   {% endfor %}
 </ul>
 <h2>Close</h2>
+{% if issue.closed_at %}
+<dl class="close-metadata">
+  <dt>Originating LLM</dt><dd>{{ issue.originating_llm }}</dd>
+  <dt>Closed by</dt><dd>{{ issue.closed_by or "" }}</dd>
+  <dt>Closed at</dt><dd>{{ issue.closed_at.strftime("%Y-%m-%d %H:%M UTC") }}</dd>
+  <dt>Close note</dt><dd>{{ issue.close_note or "" }}</dd>
+</dl>
+<p>This issue is closed; its close metadata cannot be changed or reopened.</p>
+{% endif %}
 <form method="post" action="/issues/{{ issue.id }}/close">
   <label>Originating LLM <input name="originating_llm" required></label>
   <label>Close note <textarea name="close_note"></textarea></label>
