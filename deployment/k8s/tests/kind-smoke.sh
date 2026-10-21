@@ -150,7 +150,7 @@ spec:
             claimName: issue-tracker-backups
 YAML
 kubectl -n "$ns" wait --for=condition=complete job/count-backups --timeout=180s
-kubectl -n "$ns" logs job/count-backups | head -1
+kubectl -n "$ns" logs job/count-backups | sed -n 1p
 
 echo "== storage"
 kubectl get pvc -n "$ns" -o custom-columns=NAME:.metadata.name,REQUEST:.spec.resources.requests.storage,CLASS:.spec.storageClassName,STATUS:.status.phase
@@ -168,7 +168,7 @@ off="$(mktemp -d)"
 "$here/backup-files.sh" uat list
 "$here/backup-files.sh" uat get-latest "$off"
 ls -l "$off"
-daily="$off/$(ls "$off" | grep -E '^[0-9]{8}T[0-9]{6}Z\.dump$' | head -1)"
+daily="$off/$(ls "$off" | grep -E '^[0-9]{8}T[0-9]{6}Z\.dump$' | sed -n 1p)"
 [ -s "$daily" ] || { echo "no daily dump copied off-cluster" >&2; exit 1; }
 "$here/backup-files.sh" uat put "$daily" roundtrip.dump
 
