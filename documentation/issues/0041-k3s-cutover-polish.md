@@ -1,6 +1,6 @@
 # Issue 0041: k3s Cutover Polish Before The First Real Run
 
-Status: in-progress (PR #25; review-1 fixes pushed)
+Status: in-progress (PR #25, review-1 fixes green on b6ea2d4; awaiting re-review)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
@@ -33,15 +33,16 @@ Evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/3
 - [x] **Also found and fixed:** `kubectl wait --for=delete pod -l …` errors ("no matching resources") when the selector is already empty. Both scripts now poll with `wait_app_gone` (`deploy.sh:120`, `restore.sh:50`).
 - [x] **CI green on the PR:** 5/5 on `2578a4a`.
 
-Review 1 of PR #25:
-- [ ] **B1: `wait_app_gone` fails closed.** It captures `kubectl get pods --request-timeout=10s` and returns 1 if kubectl fails, so a failed list never counts as "gone". `deployment/k8s/tests/fail-closed.sh` (no cluster; stub kubectl whose `get pods` fails) runs the real scripts:
+Review 1 of PR #25 (evidence: CI run https://github.com/spacemanspiff99/issue-tracker/actions/runs/39560958862, head `b6ea2d4`, 5/5 green):
+- [x] **B1: `wait_app_gone` fails closed.** It captures `kubectl get pods --request-timeout=10s` and returns 1 if kubectl fails, so a failed list never counts as "gone". `deployment/k8s/tests/fail-closed.sh` (no cluster; stub kubectl whose `get pods` fails) runs the real scripts:
   - `deploy.sh` must abort in the maintenance window, never apply the backup or migrate Job, and scale the old app back to 1.
   - `restore.sh` must abort before creating any ConfigMap or Job.
   - The same test fails against the `3fe776e` scripts: the old `deploy.sh` went on to the backup after "connection refused".
-- [ ] **N1:** when `restore.sh` aborts because the app won't stop, it prints the next steps. The "Found the app at 0 replicas" intro now lists that case.
-- [ ] **N3:** `k3s.md` now says a third run for the same SHA can cancel the waiting image job; that run ends cancelled before any deploy.
-- [ ] **N4:** the kind PV-release wait fails after 120s instead of carrying on.
-- [ ] CI 5/5 on the new head.
+  - CI step "deploy.sh and restore.sh fail closed when pods can't be listed" printed "ok: deploy.sh aborted before the backup and restored the previous app", "ok: restore.sh aborted before any ConfigMap or Job" and "fail-closed checks passed".
+- [x] **N1:** when `restore.sh` aborts because the app won't stop, it prints the next steps. The "Found the app at 0 replicas" intro now lists that case.
+- [x] **N3:** `k3s.md` now says a third run for the same SHA can cancel the waiting image job; that run ends cancelled before any deploy.
+- [x] **N4:** the kind PV-release wait fails after 120s instead of carrying on.
+- [x] CI 5/5 on the new head (`b6ea2d4`); the kind smoke passed in full, including the NB1/NB5 cases and 3 fresh deploys.
 
 ## Category Checklists
 
