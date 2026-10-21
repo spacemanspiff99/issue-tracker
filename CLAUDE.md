@@ -64,8 +64,9 @@ containers, never as a documented user-facing path.
   `mcp-contract`
 - **Secrets.** No `.env`, credentials, dumps, backups, or exports in git. Passwords Argon2-hashed;
   session cookie HTTP-only + SameSite=Lax. → `web-auth`
-- **Deploys need explicit user approval.** `192.168.10.8` is home-lab **production** (the
-  pipeline mislabels it `dev_host`); `.18` UAT, `.20` dev. Backup
+- **Deploys need explicit user approval.** **Production = k3s namespace `issue-tracker`**, UAT =
+  `issue-tracker-uat` (Issue 0020, not built yet). The Compose production path on `192.168.10.8`
+  is **retired**: never deploy there. `.20` Compose dev. Backup
   before migrate; never downgrade/drop/reset in a release. `/health` must show DB connectivity.
   → `deploy-safety`
 - **UI = Playwright workflows.** Any visible change: AC written as workflows, Playwright drives
