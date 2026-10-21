@@ -47,14 +47,31 @@ UAT + prod = 6Gi requested. Multiply by the storage class replica count (e.g. Lo
 - [x] PVC requests and Postgres WAL settings match the Storage Sizing table; backup CronJob prunes to the retention above.
 - [x] `documentation/guides/deployment.md` points to k3s for UAT/prod; Compose stays documented for local dev only.
 
-## Evidence (PR #13, CI run 39457751529, job `k8s`)
+## Evidence (PR #13, CI run 39541769298 on 371c1f3, job `k8s`)
 
-- Render + `kubeconform -strict`: CI step "Render and validate overlays" over `uat`, `uat/jobs`, `prod`, `prod/jobs`; also run locally: 8/2/8/2 resources valid, 0 invalid.
-- kind: `deployment/k8s/tests/kind-smoke.sh` ran two full deploys: backup Job wrote `/backups/pre-migration/<sha>-<ts>.dump`, migrate Job ran `0001`→`0004`, rollout succeeded, in-pod `health: {"ok":true,"database":"ok"}`. Then `tests/e2e` from a one-off pod: 16 passed, 6 xfailed, 70 screenshots uploaded (`k8s-e2e-screenshots`).
-- Backup is enforced: a migrate Job whose SHA has no dump failed in its `require-backup` init container ("refusing to migrate"). `deploy.sh` has no skip flag. In `k3s-pipeline.yml`, `deploy-prod` needs `deploy-uat`, has `if: promote_prod && needs.deploy-uat.result == 'success'`, refuses on a SHA mismatch, and uses `environment: prod`. That last part is checked by reading the workflow only: it can run only on the owner's runner.
-- Retention: 20 seeded daily and 8 pre-migration dumps went through one CronJob run, leaving `daily=14 pre-migration=5`, with both real dumps kept. PVCs `data-issue-tracker-postgres-0` 2Gi and `issue-tracker-backups` 1Gi are Bound. Postgres args `max_wal_size=256MB`, `min_wal_size=64MB`, `wal_keep_size=0`; requests 100m/256Mi.
-- Secrets: CI step "No secret values in deployment/k8s" passes. The only Secret manifests are `deployment/k8s/secrets/*.example.yaml`, which hold `REPLACE_WITH_*` placeholders and are not referenced by any kustomization.
-- Needs the owner's real cluster: the first `k3s-pipeline.yml` run (GHCR push and pull, ingress `/health`, `prod` reviewer gate) and the Compose-to-k3s production data move (guide steps 9-11).
+- **Render + `kubeconform -strict`:** `uat`, `uat/jobs`, `prod` and `prod/jobs` gave 8/2/8/2 valid, 0 invalid. Both full deploys, rendered pinned by digest with `RENDER_ONLY_DIR`, gave 10/10 valid each. Every app-image container is pinned to the digest, and the backup and migrate Jobs share one `BACKUP_FILE`. `deploy.sh` rejects a bad environment, an untagged image, a non-SHA and a malformed digest.
+- **kind smoke (`deployment/k8s/tests/kind-smoke.sh`):**
+  - The wrong kubectl context is refused.
+  - On the first deploy, the backup Job wrote `pre-migration/<sha>-<ts>.dump`, the migrate init container checked that exact file, `0001`→`0004` ran, and `health: {"ok":true,"database":"ok"}`.
+  - The no-op redeploy kept the Postgres pod UID and StatefulSet revision unchanged.
+  - A migrate Job without its backup was refused, and `deploy.sh` refused while a migrate Job was active.
+  - `tests/e2e` from a one-off pod: 22 passed, 72 screenshots (`k8s-e2e-screenshots`).
+- **Backup is enforced and prod is gated:**
+  - Backup: the init container check and the refusals above are proven in kind, and `deploy.sh` has no skip flag.
+  - Prod gating (checked by reading `k3s-pipeline.yml` only, because it runs only on the owner's runner): `deploy-prod` has `needs: [image, deploy-uat]` and `if: promote_prod && needs.deploy-uat.result == 'success'`. It deploys only the digest UAT verified on its live Deployment, and `environment: prod` releases the production kubeconfig only after the reviewer approves on `main` (owner steps 3 and 8).
+  - Same SHA is guaranteed because both jobs are in one run; the old SHA-equality step could never fail, so it was replaced by the digest check.
+- **Retention:** 20 seeded daily and 8 pre-migration dumps went through one CronJob run, leaving `daily=14 pre-migration=5`, with the real dumps kept. Leftover `.partial` files are removed before each dump.
+  - PVCs are 2Gi and 1Gi, both Bound. Postgres runs with `max_wal_size=256MB`, `min_wal_size=64MB`, `wal_keep_size=0`, and requests 100m/256Mi.
+- **Restore:**
+  - `backup-files.sh` copied dumps off the cluster and back on; the uploaded copy was readable by pg_restore.
+  - `restore.sh` refused without `CONFIRM`, and with `--require-empty` while `projects` was non-empty (20 projects left in place).
+  - A full restore (schema drop + restore in one `ON_ERROR_STOP` transaction) removed a leftover table and brought back 0 projects, and `/health` was ok afterwards.
+  - Locally on PG16, a dump at `0003` restored over a head database migrated forward to `0004`, which is the cutover path in guide step 12.
+- **Secrets:** the CI step "No secret values in deployment/k8s" passes. The only Secret manifests are `deployment/k8s/secrets/*.example.yaml`, which hold `REPLACE_WITH_*` placeholders. The kubeconfigs live only in the GitHub `uat` and `prod` environment secrets.
+- **Needs the owner's real cluster:**
+  - the first `k3s-pipeline.yml` run (GHCR push and pull by digest, environment secrets, ingress `/health`, the `prod` reviewer and branch gate)
+  - the PV `Retain` patch
+  - the UAT-rehearsed Compose-to-k3s data move (guide steps 9–12)
 
 ## Category Checklists
 
