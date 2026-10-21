@@ -1,6 +1,6 @@
 # Issue 0048: Restore/Deploy Concurrency Follow-Ups
 
-Status: in-progress (PR #30, green on c7f24f1; awaiting review)
+Status: done (PR #30; follow-ups in Issues 0049, 0050)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007

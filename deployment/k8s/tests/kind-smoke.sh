@@ -317,8 +317,14 @@ expect_fail "restore while a restore pod is live" env CONFIRM="$ns" "$here/resto
   || { echo "a refused restore touched the app" >&2; exit 1; }
 [ -z "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
   || { echo "a refused restore left a lock" >&2; exit 1; }
+# 0049: a deploy is refused the same way, before it takes the lock or touches the app.
+expect_fail "deploy while a restore pod is live" "$here/deploy.sh" uat "$image" "$sha"
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 1 ] \
+  || { echo "a refused deploy touched the app" >&2; exit 1; }
+[ -z "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
+  || { echo "a refused deploy left a lock" >&2; exit 1; }
 kubectl -n "$ns" delete pod fake-running-restore --wait=true
-echo "ok: restore refused while a restore pod was live; app and lock untouched"
+echo "ok: restore and deploy refused while a restore pod was live; app and lock untouched"
 
 echo "== restore that changes alembic_version leaves the app at 0; leaked pins cleared (0042 N1, N2)"
 # Pins leaked by SIGKILLed restore Jobs (bash as PID 1 ignores SIGTERM, so the EXIT trap never ran).

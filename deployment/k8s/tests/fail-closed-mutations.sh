@@ -86,7 +86,7 @@ mutate restore.sh "success, duplicate version lines: app left at 0 (N-4)" \
   'if [ "$(grep -c "^$1: " <<< "$logs" || true)" = 1 ]; then' \
   'if true; then'
 # Issue 0048.
-mutate restore.sh "live restore pod without a Job: refuses before anything (0048 #1)" \
+mutate lib.sh "live restore pod without a Job: refuses before anything (0048 #1)" \
   "| awk '\$1 != \"\" && \$2 != \"Succeeded\" && \$2 != \"Failed\" {printf \"%s \", \$1}'" \
   "| awk '{}'"
 mutate restore.sh "lock now held by another run: not released (0048 #2)" \
@@ -102,11 +102,24 @@ mutate deploy.sh "deploy: lock kept when the Jobs may still run (0048 #3)" \
   '[ "$jobs_ok" != 1 ] || [ -n "$left" ] || job_may_run=0' \
   'job_may_run=0'
 mutate deploy.sh "deploy: lock released after a successful deploy (0048 #3)" \
-  'elif [ -n "$holder" ] && ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then' \
+  'elif [ -n "$holder" ] && ! kubectl -n "$ns" --request-timeout=30s delete configmap "$lock" --ignore-not-found > /dev/null; then' \
   'elif false; then'
 mutate restore.sh "Job failed before COMMIT (control)" \
   'revision unchanged (${v_before}); app back to' \
   'the database is unchanged; app back to'
+
+# Issues 0049 and 0050.
+mutate deploy.sh "deploy: live restore pod: refuses before anything (0049)" \
+  '[ -z "$live" ] || { echo "refusing: restore pod(s) still running in $ns without an active Job: $live" >&2; exit 1; }' \
+  'true'
+mutate deploy.sh "deploy: restore pod started meanwhile: refuses before the backup (0049)" \
+  'if [ -n "$live" ]; then
+  echo "refusing: restore pod(s) started in $ns during this deploy: $live" >&2' \
+  'if false; then
+  echo "refusing: restore pod(s) started in $ns during this deploy: $live" >&2'
+mutate deploy.sh "deploy: TERM+INT during on_failure's cleanup: still finishes (0050)" \
+  "trap '' INT TERM" \
+  'trap - INT TERM'
 
 # 0048 #4: without kubectl, fail-closed.sh must stop with exit 2 and say why, not run any case
 # (and not report a failure that hides the real cause). Checked on the script and on a mutant.

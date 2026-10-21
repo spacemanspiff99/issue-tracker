@@ -305,7 +305,8 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    kubectl context is `issue-tracker-<env>`.
 2. Preflight: the Secrets `issue-tracker-db` and `issue-tracker-app` exist (it never creates them).
    It warns if `ghcr-pull` is missing. It refuses if a backup, migrate or restore Job is still
-   active, then takes the restore lock (see Restore) for the rest of the run, so no restore can
+   active, or a restore pod is still running without one (checked again just before the backup),
+   then takes the restore lock (see Restore) for the rest of the run, so no restore can
    start during the deploy.
 3. Applies everything except the app (ConfigMap, Postgres, PVCs, CronJob) and waits for Postgres.
    **Maintenance window:** it scales the app to 0 and waits for its pod to go; if the pod is still
@@ -317,6 +318,8 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    - changed, unreadable (for example locked by another session), or Jobs not confirmed gone:
      **the app stays at 0** and the log says what to check (see "Found the app at 0 replicas")
 
+   The cleanup ignores further Ctrl-C/TERM signals, so a second one doesn't cut it short; each of
+   its steps is bounded (the Job deletion waits at most 180s).
    **A cancelled run is different.** GitHub signals the step's shell and force-kills it about
    10 seconds later, which is usually before the cleanup above can finish. Expect the app at 0,
    with the migrate Job possibly still running, and follow "Found the app at 0 replicas". Don't

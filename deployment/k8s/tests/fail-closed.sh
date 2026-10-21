@@ -28,6 +28,11 @@ cat > "$work/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >> "$STUB_LOG"
 args=" $* "
+# STUB_SIGNAL_ON: the first call whose arguments contain this sends TERM and INT to the calling
+# script, as a cancelled CI run (or a second Ctrl-C) would, and then still answers.
+if [ -n "${STUB_SIGNAL_ON:-}" ] && [[ "$args" == *"$STUB_SIGNAL_ON"* ]] && [ ! -e "$STUB_LOG.signalled" ]; then
+  touch "$STUB_LOG.signalled"; kill -TERM "$PPID"; kill -INT "$PPID"; sleep 1
+fi
 if [ -n "${STUB_FAIL:-}" ]; then
   IFS='|' read -r -a entries <<< "$STUB_FAIL"
   for k in "${!entries[@]}"; do
@@ -98,7 +103,7 @@ run_case() {  # run_case <deploy|restore> <description> <STUB_FAIL entries or ->
   [ -z "${FC_ONLY:-}" ] || [[ "[$script] $desc" == *"$FC_ONLY"* ]] || return 0
   [[ "$opts" == *" always "* ]] && always=1
   [ "$fail" != - ] || stub_fail=""   # "-": fail nothing; the case is driven by STUB_* state
-  : > "$STUB_LOG"; rm -f "$STUB_LOG".failed "$STUB_LOG".seen* "$STUB_LOG".restore-reads "$STUB_LOG".lock "$STUB_LOG".pod-reads
+  : > "$STUB_LOG"; rm -f "$STUB_LOG".failed "$STUB_LOG".seen* "$STUB_LOG".restore-reads "$STUB_LOG".lock "$STUB_LOG".pod-reads "$STUB_LOG".signalled
   if [ "$script" = deploy ]; then
     STUB_FAIL="$stub_fail" STUB_FAIL_ALWAYS="$always" "$here/deploy.sh" uat ghcr.io/spacemanspiff99/issue-tracker:test "$sha" > "$out" 2>&1 && rc=0 || rc=$?
   else
@@ -276,6 +281,23 @@ EXPECT_OUTPUT="restore lock kept" run_case deploy "deploy: lock kept when the Jo
   "$wait_backup|get job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found -o name" "after-backup no-scale-up lock-kept"
 STUB_LOCK_HOLDER=someone-else EXPECT_OUTPUT="not by this deploy" \
   run_case deploy "deploy: lock now held by another run: not released (0048 #2)" - "after-jobs exit0 lock-kept"
+
+# Issue 0049: deploy.sh refuses while a restore pod is live without an active Job, before the
+# lock and again (with the app stopped) just before the backup Job.
+STUB_RESTORE_PODS="$live_pods" EXPECT_OUTPUT="restore pod(s) still running" \
+  run_case deploy "deploy: live restore pod: refuses before anything (0049)" - lock-kept
+STUB_RESTORE_PODS="$live_pods" STUB_RESTORE_PODS_FROM=2 EXPECT_OUTPUT="restore pod(s) started in" \
+  run_case deploy "deploy: restore pod started meanwhile: refuses before the backup (0049)" - "scale-back lock-released"
+STUB_RESTORE_PODS=$'issue-tracker-restore-0-old Succeeded\nissue-tracker-restore-0-older Failed' \
+  run_case deploy "deploy: finished restore pods don't block (0049)" - "after-jobs exit0 lock-released"
+run_case deploy "deploy: restore pods unreadable before the lock (0049)" "get pods -l app.kubernetes.io/component=restore" lock-kept
+run_case deploy "deploy: restore pods unreadable before the backup (0049)" "2:get pods -l app.kubernetes.io/component=restore" "scale-back lock-released"
+# Issue 0050: TERM + INT arrive while on_failure is deleting the Jobs. It must still finish: print
+# its summary, bring the old app back (Jobs gone, version unchanged) and release the lock.
+STUB_SIGNAL_ON="--cascade=foreground" EXPECT_OUTPUT="restoring the previous app" \
+  run_case deploy "deploy: TERM+INT during on_failure's cleanup: still finishes (0050)" "$wait_backup" "after-backup scale-back lock-released"
+STUB_SIGNAL_ON="get job issue-tracker-backup-predeploy issue-tracker-migrate --ignore-not-found -o name" EXPECT_OUTPUT="restoring the previous app" \
+  run_case deploy "deploy: TERM+INT during on_failure's Job check: still finishes (0050)" "$wait_backup" "after-backup scale-back lock-released"
 
 # restore-job.sh itself, against stub psql/pg_dump/pg_restore and a scratch /backups (BACKUPS_ROOT).
 mkdir -p "$work/pgbin"

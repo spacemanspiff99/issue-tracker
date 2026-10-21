@@ -45,13 +45,8 @@ for job in issue-tracker-backup-predeploy issue-tracker-migrate; do
 done
 active="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o jsonpath='{range .items[*]}{.status.active}{end}')"
 [ -z "$active" ] || { echo "refusing: another restore Job is active in $ns" >&2; exit 1; }
-# Restore pods not yet Succeeded/Failed (a pod can outlive its Job, or be made by hand). Any one
-# may be using a pin in /backups/restoring, so none may be live when this restore's Job starts.
-live_restore_pods() {
-  kubectl -n "$ns" get pods -l app.kubernetes.io/component=restore \
-    -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase}{"\n"}{end}' \
-    | awk '$1 != "" && $2 != "Succeeded" && $2 != "Failed" {printf "%s ", $1}'
-}
+# No restore pod may be live when this restore's Job starts (it may be using a pin).
+. "$here/lib.sh"
 live="$(live_restore_pods)"
 [ -z "$live" ] || { echo "refusing: restore pod(s) still running in $ns without an active Job: $live" >&2; exit 1; }
 
