@@ -291,6 +291,11 @@ psql_pg 'drop schema public cascade; create schema public' > /dev/null
 CONFIRM="$ns" "$here/restore.sh" uat "$head_dump" --require-empty
 [ -n "$(psql_pg 'select version_num from alembic_version')" ]
 echo "ok: --require-empty passed with no projects table; schema restored at $(psql_pg 'select version_num from alembic_version')"
+# The app was at 0 before that restore, so it stays at 0 (B1, round 3); bring it back for e2e.
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
+  || { echo "restore scaled up an app that was at 0" >&2; exit 1; }
+kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
+kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 
 echo "== every restore wrote a readable safety dump first (NB3)"
 "$here/backup-files.sh" uat list | tee "$deploy_log.list"

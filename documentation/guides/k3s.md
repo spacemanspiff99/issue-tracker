@@ -402,13 +402,16 @@ keeps the pod and the PVC) and redeploy.
 
 `restore.sh` overwrites live data and runs only with `CONFIRM=<namespace>`. First close every MCP
 session that points at this database: the stdio MCP server opens its own DB connection and doesn't
-go through the web app. The script then:
+go through the web app. **Don't run a restore while a pipeline deploy is running** in the same
+namespace; wait for the run to finish (or check Actions) first. The script then:
 - refuses if a backup, migrate or another restore Job is active
 - scales the app to zero
 - runs a Job (`restore-job.sh`) that:
-  - checks the dump with `pg_restore -l`
+  - pins the dump with a hard link in `/backups/restoring/`, so no prune can delete it mid-restore,
+    and checks it with `pg_restore -l`
   - writes a **safety dump of the current database** to `/backups/pre-restore/<ts>-<pod>.dump`
-    (the newest 5 are kept)
+    (after a successful restore the newest 5 are kept, never counting or deleting the dump that
+    was just restored)
   - in one `psql` transaction with `ON_ERROR_STOP`: (with `--require-empty`) refuses if
     `projects` has rows, then runs `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` and the
     whole restore. The guard passes when `projects` is absent or empty.
@@ -418,8 +421,12 @@ from a bad migration don't survive. This gives the same all-or-nothing behavior 
 `pg_restore --single-transaction --exit-on-error`, and extends it to cover the schema drop.
 
 Outcomes:
-- **Succeeded:** the app is scaled back up.
-- **Failed before `COMMIT`:** the database is unchanged and the app is scaled back up.
+- **Succeeded:** the app goes back to its previous replica count (an app that was at 0 stays at 0),
+  or stays at 0 with `--keep-app-down`.
+- **Failed before `COMMIT`** (the Job logs prove it): the database is unchanged and the app goes
+  back to its previous replica count, or stays at 0 if it was at 0 or `--keep-app-down` was given.
+- **Failed, and the logs can't show whether it committed:** the app stays at 0; check as in "Found
+  the app at 0 replicas".
 - **Timed out** (`RESTORE_TIMEOUT_SECONDS`, default 600): the script deletes the Job so an
   uncommitted transaction rolls back. It **leaves the app at 0 replicas**, because the
   transaction may have committed just before the deletion. Check `select version_num from

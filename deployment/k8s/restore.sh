@@ -68,18 +68,23 @@ has_app=0
 # Decides on one read that fails the script on any API error (set -e). With --ignore-not-found a
 # missing Deployment prints "" and a present one always prints its replica count (0 or more).
 replicas="$(kubectl -n "$ns" get deployment issue-tracker --ignore-not-found -o jsonpath='{.spec.replicas}')"
+# prev_replicas is what the app had before this restore; the app only ever returns to that
+# (never above it, and never at all with --keep-app-down). advise_replicas is for messages.
+prev_replicas="${replicas:-0}"
+advise_replicas="$prev_replicas"
+[ "$advise_replicas" -ge 1 ] || advise_replicas=1
+restore_app_to=0
+[ "$keep_down" = 0 ] && restore_app_to="$prev_replicas"
 if [ -n "$replicas" ]; then
   has_app=1
-  [ "${replicas:-0}" -ge 1 ] || replicas=1
   kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
   if ! wait_app_gone 120; then
     echo "restore aborted before touching the database (no safety dump, no restore). The app is" >&2
     echo "scaled to 0 but may still be running. Check: kubectl -n $ns get pods -l app.kubernetes.io/component=web" >&2
-    echo "Then retry the restore, or bring the app back: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas" >&2
+    echo "Then retry the restore, or bring the app back: kubectl -n $ns scale deployment/issue-tracker --replicas=$advise_replicas" >&2
     exit 1
   fi
 else
-  replicas=1
   echo "no issue-tracker Deployment in $ns yet; nothing to stop"
 fi
 
@@ -160,15 +165,21 @@ if [ -z "$status" ]; then
   fi
   echo "The restore is one transaction, so the database is either unchanged or fully restored." >&2
   echo "Check before scaling up: alembic_version and project count (documentation/guides/k3s.md, Restore)," >&2
-  echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas" >&2
+  echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$advise_replicas" >&2
   exit 1
 fi
 
 if [ "$status" = failed ]; then
   if [ "$committed" = no ]; then
-    # The logs prove the transaction never committed, so the old state is intact.
-    [ "$has_app" = 1 ] && kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
-    echo "restore failed before COMMIT; the database is unchanged (transaction rolled back)" >&2
+    # The logs prove the transaction never committed, so the old state is intact: put the app
+    # back exactly as it was (0 stays 0, and --keep-app-down keeps it at 0).
+    if [ "$has_app" = 1 ] && [ "$restore_app_to" -ge 1 ]; then
+      kubectl -n "$ns" scale deployment/issue-tracker --replicas="$restore_app_to"
+      echo "restore failed before COMMIT; the database is unchanged (transaction rolled back); app back to $restore_app_to replica(s)" >&2
+    else
+      echo "restore failed before COMMIT; the database is unchanged (transaction rolled back); app left at 0" >&2
+      [ "$has_app" = 1 ] && echo "To bring it back: kubectl -n $ns scale deployment/issue-tracker --replicas=$advise_replicas" >&2
+    fi
   else
     echo "restore Job $job failed and it is not known that nothing committed (committed=$committed); app left at 0." >&2
     echo "Check: kubectl -n $ns logs job/$job; alembic_version and project count, then scale up as in" >&2
@@ -181,7 +192,7 @@ if [ "$keep_down" = 1 ]; then
   if [ "$has_app" = 1 ]; then
     echo "restored $dump into $ns; app left at 0 replicas (--keep-app-down)."
     echo "Next: kubectl -n $ns set image deployment/issue-tracker app=<image that matches this schema>"
-    echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas"
+    echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$advise_replicas"
     echo "(or run the pipeline: its deploy migrates the data and brings the app up)"
   else
     echo "restored $dump into $ns. There is no app Deployment yet; the next pipeline deploy creates it,"
@@ -189,8 +200,11 @@ if [ "$keep_down" = 1 ]; then
   fi
   exit 0
 fi
-if [ "$has_app" = 1 ]; then
-  kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
+if [ "$has_app" = 1 ] && [ "$restore_app_to" -ge 1 ]; then
+  kubectl -n "$ns" scale deployment/issue-tracker --replicas="$restore_app_to"
   kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+elif [ "$has_app" = 1 ]; then
+  echo "the app was at 0 replicas before this restore; leaving it at 0"
+  echo "To bring it back: kubectl -n $ns scale deployment/issue-tracker --replicas=1"
 fi
 echo "restored $dump into $ns. If alembic_version is behind head, the next pipeline run backs up and migrates it forward."

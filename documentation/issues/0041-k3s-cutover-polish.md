@@ -1,6 +1,6 @@
 # Issue 0041: k3s Cutover Polish Before The First Real Run
 
-Status: in-progress (PR #25, review-2 fixes green on 7d81ad9; awaiting re-review)
+Status: in-progress (PR #25; review-3 fixes pushed)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
@@ -12,8 +12,10 @@ cheap items before the owner's first real cutover.
 
 ## Files in scope
 
-`deployment/k8s/restore.sh`, `deployment/k8s/tests/kind-smoke.sh`, `.github/workflows/image.yml`,
-`documentation/guides/k3s.md`, this file.
+`deployment/k8s/deploy.sh`, `deployment/k8s/restore.sh`, `deployment/k8s/restore-job.sh`,
+`deployment/k8s/base/postgres.yaml`, `deployment/k8s/tests/` (`kind-smoke.sh`, `fail-closed.sh`,
+`fail-closed-mutations.sh`), `.github/workflows/image.yml`, the `k8s` job in
+`.github/workflows/ci.yml`, `documentation/guides/k3s.md`, this file.
 
 ## Acceptance Criteria
 
@@ -51,10 +53,25 @@ Review 2 of PR #25, the fail-open pattern fixed as a class (evidence: CI run htt
   - `restore.sh`'s post-Job handling: status reads, logs and delete each fail closed.
   - `deploy.sh`'s `on_failure` checks exit codes explicitly.
 - [x] **NB-b:** `deploy.sh` waits for app pods whenever the Deployment exists, even at 0 replicas.
-- [x] **Test:** `tests/fail-closed.sh` fails one chosen kubectl call per case (23 cases plus the NB-b state case) and asserts that nothing irreversible is applied. Against `d249aa3` it fails 6 cases (NB-a ×4, NB-b, B2); against this branch it passes them all.
+- [x] **Test:** `tests/fail-closed.sh` failed one chosen kubectl call per case at that point (14 `deploy.sh` and 8 `restore.sh` decision points, plus the NB-b state case; the 9th `restore.sh` "case" was the B2 placeholder that only read "n/a" and is removed in review 3) and asserts that nothing irreversible is applied. Against `d249aa3` it fails 6 cases (NB-a ×4, NB-b, B2); against this branch it passes them all.
 - [x] **NB-c:** the guide notes the one-time Postgres restart on the first deploy after the probe change.
 - [x] **NB-d:** the `--keep-app-down` next-step text covers the no-Deployment case.
 - [x] CI 5/5 on `7d81ad9`. The CI fail-closed step passed all cases, and the kind smoke passed in full: blocked migration, failing backup, migrate timeout and 3 fresh deploys.
+
+Review 3 of PR #25:
+- [ ] **B1:** `restore.sh` remembers the app's previous replica count. After a pre-COMMIT failure (and after success) the app goes back to that count, never above it, and stays at 0 if it was at 0 or `--keep-app-down` was given. Before, an app at 0 came back at 1 even with `--keep-app-down`.
+- [ ] **Tests after the Jobs are applied:** `fail-closed.sh` has 34 cases. New ones:
+  - deploy: the `wait_job` read fails, alone and together with each `on_failure` check
+  - restore: the status poll, the logs and the timeout delete each fail
+  - B1: 3 cases, app at 0 with and without `--keep-app-down`, and `--keep-app-down` at 1
+  - a positive control
+  - The 3 B1 cases fail on `2d22fc0` and pass now.
+- [ ] **Mutation check:** `tests/fail-closed-mutations.sh` (new, CI) re-introduces 8 fail-open patterns into a copy of the scripts and requires the matching case to FAIL. Among them is `|| true` on the restore logs read (the regression the reviewer found the suite missed). All 8 are caught.
+- [ ] **NB2 placeholder:** removed (the B2 "n/a" case); case counts above corrected.
+- [ ] **NB3:** `restore-job.sh` pins the dump with a hard link in `/backups/restoring/` (outside every pruned folder) and restores from the pin. It prunes `pre-restore` only after COMMIT, never counting or deleting the restored dump. Checked locally on PG16 by restoring the oldest of 7 pre-restore dumps: it survived, the newest 5 others were kept, and the pin was removed.
+- [ ] **NB4:** `k3s.md` Restore: don't run a restore while a pipeline deploy is running.
+- [ ] **NB5:** "Files in scope" above now lists every file this issue changed.
+- [ ] CI 5/5 on the new head.
 
 ## Category Checklists
 
