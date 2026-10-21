@@ -36,8 +36,9 @@ context="$(kubectl config current-context)"
 [ "$context" = "$expected_context" ] || { echo "refusing: context '$context', expected '$expected_context'" >&2; exit 2; }
 here="$(cd "$(dirname "$0")" && pwd)"
 
+# Any kubectl error here stops the restore (set -e); only a missing Job reads as "not active".
 for job in issue-tracker-backup-predeploy issue-tracker-migrate; do
-  active="$(kubectl -n "$ns" get job "$job" -o jsonpath='{.status.active}' 2> /dev/null || true)"
+  active="$(kubectl -n "$ns" get job "$job" --ignore-not-found -o jsonpath='{.status.active}')"
   [ "${active:-0}" -ge 1 ] && { echo "refusing: job $job is active in $ns" >&2; exit 1; }
 done
 active="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o jsonpath='{range .items[*]}{.status.active}{end}')"
@@ -64,8 +65,10 @@ wait_app_gone() {
 # Only a missing Deployment is tolerated; any other error, or an app pod that won't stop,
 # aborts here, before the safety dump and the restore.
 has_app=0
+# Decides on one read that fails the script on any API error (set -e). With --ignore-not-found a
+# missing Deployment prints "" and a present one always prints its replica count (0 or more).
 replicas="$(kubectl -n "$ns" get deployment issue-tracker --ignore-not-found -o jsonpath='{.spec.replicas}')"
-if kubectl -n "$ns" get deployment issue-tracker --ignore-not-found -o name | grep -q .; then
+if [ -n "$replicas" ]; then
   has_app=1
   [ "${replicas:-0}" -ge 1 ] || replicas=1
   kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
@@ -129,38 +132,65 @@ YAML
 
 deadline=$((SECONDS + timeout)) status=""
 while (( SECONDS < deadline )); do
-  [ -n "$(kubectl -n "$ns" get job "$job" -o jsonpath='{.status.succeeded}')" ] && { status=ok; break; }
-  [ -n "$(kubectl -n "$ns" get job "$job" -o jsonpath='{.status.failed}')" ] && { status=failed; break; }
+  # A failed read is "unknown, keep waiting"; at the deadline the timeout path keeps the app at 0.
+  if st="$(kubectl -n "$ns" get job "$job" -o jsonpath='{.status.succeeded}/{.status.failed}' --request-timeout=10s)"; then
+    case "$st" in
+      [1-9]*/*) status=ok; break ;;
+      */[1-9]*) status=failed; break ;;
+    esac
+  fi
   sleep 3
 done
-logs="$(kubectl -n "$ns" logs "job/$job" 2>&1 || true)"
+logs_ok=1
+logs="$(kubectl -n "$ns" logs "job/$job" 2>&1)" || logs_ok=0
 echo "$logs"
+committed=unknown
+if [ "$logs_ok" = 1 ]; then
+  if grep -q '^restore committed$' <<< "$logs"; then committed=yes; else committed=no; fi
+fi
 
 if [ -z "$status" ]; then
-  # Still running: delete the Job so its pod dies and an uncommitted transaction rolls back.
-  # It may have committed in the meantime, so the app stays at 0 until the owner checks.
-  kubectl -n "$ns" delete job "$job" --wait=true --cascade=foreground --timeout=120s || true
-  echo "restore timed out after ${timeout}s; Job $job deleted; app left at 0 replicas." >&2
+  # Still running (or unreadable): delete the Job so its pod dies and an uncommitted transaction
+  # rolls back. It may have committed in the meantime, so the app stays at 0 until the owner checks.
+  if kubectl -n "$ns" delete job "$job" --wait=true --cascade=foreground --timeout=120s; then
+    echo "restore timed out after ${timeout}s; Job $job deleted; app left at 0 replicas." >&2
+  else
+    echo "restore timed out after ${timeout}s and Job $job could NOT be confirmed deleted; app left at 0." >&2
+    echo "It may still be running: kubectl -n $ns get job $job; kubectl -n $ns logs job/$job" >&2
+  fi
   echo "The restore is one transaction, so the database is either unchanged or fully restored." >&2
   echo "Check before scaling up: alembic_version and project count (documentation/guides/k3s.md, Restore)," >&2
   echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas" >&2
   exit 1
 fi
 
-if [ "$keep_down" = 1 ] && [ "$status" = ok ]; then
-  echo "restored $dump into $ns; app left at 0 replicas (--keep-app-down)."
-  echo "Next: kubectl -n $ns set image deployment/issue-tracker app=<image that matches this schema>"
-  echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas"
-  exit 0
-fi
-[ "$has_app" = 1 ] && kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
 if [ "$status" = failed ]; then
-  if grep -q '^restore committed$' <<< "$logs"; then
-    echo "restore committed but the Job failed afterwards; inspect $job" >&2
-  else
+  if [ "$committed" = no ]; then
+    # The logs prove the transaction never committed, so the old state is intact.
+    [ "$has_app" = 1 ] && kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
     echo "restore failed before COMMIT; the database is unchanged (transaction rolled back)" >&2
+  else
+    echo "restore Job $job failed and it is not known that nothing committed (committed=$committed); app left at 0." >&2
+    echo "Check: kubectl -n $ns logs job/$job; alembic_version and project count, then scale up as in" >&2
+    echo "documentation/guides/k3s.md, Found the app at 0 replicas." >&2
   fi
   exit 1
 fi
-[ "$has_app" = 1 ] && kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+
+if [ "$keep_down" = 1 ]; then
+  if [ "$has_app" = 1 ]; then
+    echo "restored $dump into $ns; app left at 0 replicas (--keep-app-down)."
+    echo "Next: kubectl -n $ns set image deployment/issue-tracker app=<image that matches this schema>"
+    echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$replicas"
+    echo "(or run the pipeline: its deploy migrates the data and brings the app up)"
+  else
+    echo "restored $dump into $ns. There is no app Deployment yet; the next pipeline deploy creates it,"
+    echo "migrates the restored data and brings the app up."
+  fi
+  exit 0
+fi
+if [ "$has_app" = 1 ]; then
+  kubectl -n "$ns" scale deployment/issue-tracker --replicas="$replicas"
+  kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+fi
 echo "restored $dump into $ns. If alembic_version is behind head, the next pipeline run backs up and migrates it forward."

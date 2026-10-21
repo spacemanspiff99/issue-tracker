@@ -1,6 +1,6 @@
 # Issue 0041: k3s Cutover Polish Before The First Real Run
 
-Status: in-progress (PR #25, review-1 fixes green on b6ea2d4; awaiting re-review)
+Status: in-progress (PR #25; review-2 fixes pushed)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007
@@ -43,6 +43,18 @@ Review 1 of PR #25 (evidence: CI run https://github.com/spacemanspiff99/issue-tr
 - [x] **N3:** `k3s.md` now says a third run for the same SHA can cancel the waiting image job; that run ends cancelled before any deploy.
 - [x] **N4:** the kind PV-release wait fails after 120s instead of carrying on.
 - [x] CI 5/5 on the new head (`b6ea2d4`); the kind smoke passed in full, including the NB1/NB5 cases and 3 fresh deploys.
+
+Review 2 of PR #25 (the fail-open pattern, fixed as a class):
+- [ ] **B2:** `restore.sh` decided "is there an app?" with `kubectl … -o name | grep -q .`. A kubectl error took the else branch ("nothing to stop") and went on to the restore. It now decides on the `.spec.replicas` read alone (`--ignore-not-found`, fails under `set -e`).
+- [ ] **Audit:** every kubectl and psql call whose result decides whether to proceed, in `deploy.sh`, `restore.sh`, `backup-files.sh`, `e2e.sh`, `restore-job.sh` and the Job/CronJob scripts. Each one now fails closed on error, and "not found" is only ever read via `--ignore-not-found` with a successful exit. The list of decision points, with file:line and how each fails closed, is in a comment on PR #25.
+  - NB-a: the "Job active?" checks no longer use `2>/dev/null || true`.
+  - `restore.sh`'s post-Job handling: status reads, logs and delete each fail closed.
+  - `deploy.sh`'s `on_failure` checks exit codes explicitly.
+- [ ] **NB-b:** `deploy.sh` waits for app pods whenever the Deployment exists, even at 0 replicas.
+- [ ] **Test:** `tests/fail-closed.sh` fails one chosen kubectl call per case (23 cases plus the NB-b state case) and asserts that nothing irreversible is applied. Against `d249aa3` it fails 6 cases (NB-a ×4, NB-b, B2); against this branch it passes them all.
+- [ ] **NB-c:** the guide notes the one-time Postgres restart on the first deploy after the probe change.
+- [ ] **NB-d:** the `--keep-app-down` next-step text covers the no-Deployment case.
+- [ ] CI 5/5 on the new head.
 
 ## Category Checklists
 

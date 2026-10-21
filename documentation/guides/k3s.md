@@ -331,6 +331,12 @@ CONFIRM=issue-tracker deployment/k8s/restore.sh prod /backups/imports/to-k3s.dum
    `/health`.
 7. Checks `/health` from inside the pod. The pipeline also checks the ingress URL.
 
+**One-time Postgres restart (issue 0041).** The Postgres probes now check over TCP. On a namespace
+deployed before that change, the first deploy afterwards changes the StatefulSet's pod template, so
+Kubernetes restarts the Postgres pod once during step 3, while the old app is still up. Expect a few
+seconds of `/health` failing on the old app; the deploy waits for the new pod before it continues.
+Later deploys don't restart Postgres.
+
 `RENDER_ONLY_DIR=<dir> deploy.sh ...` writes the exact manifests to `<dir>` and touches no cluster.
 CI uses it.
 
