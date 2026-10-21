@@ -34,7 +34,7 @@ def run_stdio() -> None:
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as exc:
-        raise SystemExit("mcp package is required to run the stdio server") from exc
+        raise SystemExit(f"cannot start the stdio MCP server (needs mcp>=1.2,<2): {exc}") from exc
 
     mcp = FastMCP("issue-tracker")
 
