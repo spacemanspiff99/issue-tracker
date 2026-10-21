@@ -60,11 +60,34 @@ mutate deploy.sh "app pods gone?" \
   'if ! pods="$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name --request-timeout=10s)"; then' \
   'if ! pods="$(kubectl -n "$ns" get pods -l app.kubernetes.io/component=web -o name --request-timeout=10s || true)"; then'
 mutate restore.sh "success, schema changed: app left at 0 (N1)" \
-  'v_before="" v_after="" schema_same=0' \
-  'v_before="" v_after="" schema_same=1'
+  'schema_same="$(same_version "$v_before" "$v_after")"' \
+  'schema_same=1'
 mutate restore.sh "another restore started meanwhile (N4)" \
   'if [ -n "$active" ]; then' \
   'if false; then'
+mutate restore.sh "lock already held: refuses, leaves the lock (N-1)" \
+  'if ! kubectl -n "$ns" create configmap "$lock" --from-literal=job="$job" > /dev/null; then' \
+  'if ! { kubectl -n "$ns" create configmap "$lock" --from-literal=job="$job" > /dev/null || true; }; then'
+mutate restore.sh "lock kept while the Job may still run (N-1)" \
+  'job_may_run=1
+kubectl -n "$ns" create -f - <<YAML' \
+  'job_may_run=0
+kubectl -n "$ns" create -f - <<YAML'
+mutate restore.sh "lock released after a successful restore (N-1)" \
+  'elif ! kubectl -n "$ns" delete configmap "$lock" --ignore-not-found > /dev/null; then' \
+  'elif false; then'
+mutate restore-job.sh "leaked pin removed, running pod's pin kept (N-2)" \
+  'if [[ " ${KEEP_PINS:-} " == *" $name "* ]]; then' \
+  'if false; then'
+mutate restore-job.sh "failed transaction logs the version after the failure (N-3)" \
+  'echo "alembic_version after failed restore: $after"' \
+  ':'
+mutate restore.sh "failed, version changed: app left at 0 (N-3)" \
+  'if [ "$committed" = no ] && [ "$(same_version "$v_before" "$v_failed")" = 1 ]; then' \
+  'if [ "$committed" = no ]; then'
+mutate restore.sh "success, duplicate version lines: app left at 0 (N-4)" \
+  'if [ "$(grep -c "^$1: " <<< "$logs" || true)" = 1 ]; then' \
+  'if true; then'
 
 if [ "$bad" -ne 0 ]; then
   echo "$bad mutation(s) not caught" >&2

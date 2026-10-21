@@ -404,14 +404,19 @@ keeps the pod and the PVC) and redeploy.
 session that points at this database: the stdio MCP server opens its own DB connection and doesn't
 go through the web app. **Don't run a restore while a pipeline deploy is running** in the same
 namespace; wait for the run to finish (or check Actions) first. The script then:
-- refuses if a backup, migrate or another restore Job is active, and checks again just before it
-  creates its Job (a second restore started meanwhile makes it stop with the app at 0)
-- scales the app to zero
+- refuses if a backup, migrate or another restore Job is active
+- takes the **restore lock**, the ConfigMap `issue-tracker-restore-lock` (an atomic create, so a
+  second `restore.sh` is refused), and releases it on exit. It keeps the lock if its Job may still
+  be running (an interrupted run, or a timed-out Job it could not delete) and says so. If a killed
+  `restore.sh` left the lock behind, check that no restore Job or pod is running
+  (`kubectl -n <ns> get jobs,pods -l app.kubernetes.io/component=restore`), then
+  `kubectl -n <ns> delete configmap issue-tracker-restore-lock`.
+- scales the app to zero, and checks again for an active restore Job just before it creates its own
 - runs a Job (`restore-job.sh`) that:
-  - clears pins leaked in `/backups/restoring/` by an earlier restore Job that was killed, then
-    pins the dump with a hard link there, so no prune can delete it mid-restore, and checks it
-    with `pg_restore -l`
-  - logs `alembic_version` before and after the restore
+  - logs `alembic_version` before the restore, and again after it (or after a failure)
+  - removes pins leaked in `/backups/restoring/` by restore Jobs that were killed, but never the pin
+    of a restore pod that is still running, then pins the dump with a hard link there, so no prune
+    can delete it mid-restore, and checks it with `pg_restore -l`
   - writes a **safety dump of the current database** to `/backups/pre-restore/<ts>-<pod>.dump`
     (after a successful restore the newest 5 are kept, never counting or deleting the dump that
     was just restored)
@@ -431,10 +436,11 @@ Outcomes:
   current image may not match the restored schema. The script exits non-zero and prints both
   versions; follow Rollback 2 (`set image` to an image that matches, then scale up), or run the
   pipeline, whose deploy migrates the restored data forward and brings the app up.
-- **Failed before `COMMIT`** (the Job logs prove it): the database is unchanged and the app goes
-  back to its previous replica count, or stays at 0 if it was at 0 or `--keep-app-down` was given.
-- **Failed, and the logs can't show whether it committed:** the app stays at 0; check as in "Found
-  the app at 0 replicas".
+- **Failed before `COMMIT`**, and the Job re-read the same `alembic_version` on its way out: the
+  database is unchanged and the app goes back to its previous replica count, or stays at 0 if it
+  was at 0 or `--keep-app-down` was given. A changed or missing version leaves the app at 0.
+- **Failed, and the logs can't show whether it committed** (unreadable, or a version line missing or
+  repeated): the app stays at 0; check as in "Found the app at 0 replicas".
 - **Timed out** (`RESTORE_TIMEOUT_SECONDS`, default 600): the script deletes the Job so an
   uncommitted transaction rolls back. It **leaves the app at 0 replicas**, because the
   transaction may have committed just before the deletion. Check `select version_num from

@@ -288,9 +288,23 @@ echo "ok: --require-empty passed with an empty projects table"
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
 echo "ok: same-revision restore brought the app back to 1 replica"
 
-echo "== restore that changes alembic_version leaves the app at 0; leaked pin cleared (0042 N1, N2)"
-# A pin leaked by a SIGKILLed restore Job (bash as PID 1 ignores SIGTERM, so its EXIT trap never ran).
-pvc_sh plant-stale-pin "mkdir -p /backups/restoring && ln $head_dump /backups/restoring/killed-pod.dump"
+echo "== restore lock: refused while held, left in place (0047 N-1)"
+kubectl -n "$ns" create configmap issue-tracker-restore-lock --from-literal=job=held-by-test
+expect_fail "restore while the restore lock is held" env CONFIRM="$ns" "$here/restore.sh" uat "$head_dump"
+[ -n "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
+  || { echo "a refused restore released a lock it didn't hold" >&2; exit 1; }
+[ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 1 ] \
+  || { echo "a refused restore touched the app" >&2; exit 1; }
+kubectl -n "$ns" delete configmap issue-tracker-restore-lock
+echo "ok: restore refused while the lock was held; lock and app untouched"
+
+echo "== restore that changes alembic_version leaves the app at 0; leaked pin cleared (0042 N1, N2; 0047 N-2)"
+# A pin leaked by a SIGKILLed restore Job (bash as PID 1 ignores SIGTERM, so its EXIT trap never ran),
+# and the pin of a restore pod that is still running (a bare pod, so no restore Job is active).
+pvc_sh plant-stale-pin "mkdir -p /backups/restoring && ln $head_dump /backups/restoring/killed-pod.dump && ln $head_dump /backups/restoring/fake-running-restore.dump"
+kubectl -n "$ns" run fake-running-restore --image=postgres:16.15 --restart=Never \
+  --labels=app.kubernetes.io/name=issue-tracker,app.kubernetes.io/component=restore -- sleep 600
+kubectl -n "$ns" wait --for=condition=Ready pod/fake-running-restore --timeout=180s
 # The live schema reads as another revision than the dump's, as after a deploy migrated past it.
 psql_pg "update alembic_version set version_num = '0003_fake_other'" > /dev/null
 n1_log="$(mktemp)"
@@ -300,11 +314,15 @@ fi
 cat "$n1_log"
 grep -q "alembic_version went from '0003_fake_other' to '" "$n1_log"
 grep -q "removed '/backups/restoring/killed-pod.dump'" "$n1_log"
+grep -q "keeping pin of running restore pod fake-running-restore" "$n1_log"
+[ -z "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
+  || { echo "restore did not release its lock" >&2; exit 1; }
 [ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
   || { echo "restore across revisions scaled the app up" >&2; exit 1; }
 [ "$(psql_pg 'select version_num from alembic_version')" != 0003_fake_other ]
-pvc_sh check-no-pins 'test -z "$(ls -A /backups/restoring)"'
-echo "ok: app left at 0 after a restore that changed alembic_version; stale pin removed, no pin left"
+pvc_sh check-pins '[ "$(ls -A /backups/restoring)" = fake-running-restore.dump ] && rm /backups/restoring/fake-running-restore.dump'
+kubectl -n "$ns" delete pod fake-running-restore --wait=true
+echo "ok: app left at 0 after a restore that changed alembic_version; leaked pin removed, running pod's pin kept, lock released"
 
 echo "== restore --require-empty passes when projects is ABSENT (NB2)"
 kubectl -n "$ns" scale deployment/issue-tracker --replicas=0
@@ -366,6 +384,8 @@ expect_fail "restore that outlives its timeout" env CONFIRM="$ns" RESTORE_TEST_D
 [ "$(kubectl -n "$ns" get deployment issue-tracker -o jsonpath='{.spec.replicas}')" = 0 ] \
   || { echo "app was scaled up after a timed-out restore" >&2; exit 1; }
 [ "$(psql_pg 'select count(*) from projects')" = "$projects" ] || { echo "timed-out restore changed data" >&2; exit 1; }
+[ -z "$(kubectl -n "$ns" get configmap issue-tracker-restore-lock --ignore-not-found -o name)" ] \
+  || { echo "timed-out restore kept its lock although its Job was deleted" >&2; exit 1; }
 echo "ok: timed-out restore left the app at 0 and $projects projects in place"
 kubectl -n "$ns" scale deployment/issue-tracker --replicas=1
 kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s

@@ -1,23 +1,14 @@
 #!/usr/bin/env bash
 # Runs INSIDE the restore Job pod (restore.sh mounts it from a ConfigMap). Do not run by hand.
-# Env: DUMP, REQUIRE_EMPTY (0|1), POSTGRES_USER, POSTGRES_DB, PGHOST, PGPASSWORD, and
+# Env: DUMP, REQUIRE_EMPTY (0|1), KEEP_PINS, POSTGRES_USER, POSTGRES_DB, PGHOST, PGPASSWORD, and
 # RESTORE_TEST_DELAY_SECONDS (tests only: pause before the transaction).
 set -euo pipefail
 
-# Pin the dump with a hard link outside the pruned folders, so no prune (the daily CronJob, the
-# backup Job, or this script) can remove it while it is being restored. Restore from the pin.
-# Restores never overlap (restore.sh refuses while one is active), so any pin already here was leaked
-# by a killed restore Job: bash as PID 1 ignores SIGTERM, so a SIGKILL (grace period, OOM) skips the
-# EXIT trap. Clear those first; each leaked hard link would otherwise keep its dump's space in use.
-mkdir -p /backups/restoring
-rm -fv /backups/restoring/*.dump
-pin="/backups/restoring/${HOSTNAME:-local}.dump"
-ln "$DUMP" "$pin"
-trap 'rm -f "$pin"' EXIT
-pg_restore -l "$pin" > /dev/null
+# Tests only: BACKUPS_ROOT stands in for /backups (the Job never sets it).
+root="${BACKUPS_ROOT:-/backups}"
 
 # The schema revision, "(none)" if there is no alembic_version table; any other error fails.
-# restore.sh compares the before and after lines to decide whether the app may come back.
+# restore.sh compares these log lines to decide whether the app may come back.
 db_version() {
   local present
   present="$(psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select to_regclass('public.alembic_version') is not null")" || return 1
@@ -28,15 +19,48 @@ db_version() {
     echo '(none)'
   fi
 }
+# Read first, so any later failure can be compared against it: on a failure the EXIT trap
+# re-reads the revision, and restore.sh brings the app back only if it is unchanged.
 before="$(db_version)"
 echo "alembic_version before restore: $before"
+
+pin="$root/restoring/${HOSTNAME:-local}.dump" pinned=0
+on_exit() {
+  local rc=$? after
+  [ "$pinned" = 0 ] || rm -f "$pin"
+  if [ "$rc" -ne 0 ]; then
+    after="$(db_version)" || after="(unreadable)"
+    echo "alembic_version after failed restore: $after"
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
+
+# Pin the dump with a hard link outside the pruned folders, so no prune (the daily CronJob, the
+# backup Job, or this script) can remove it while it is being restored. Restore from the pin.
+# A killed restore Job leaks its pin (bash as PID 1 ignores SIGTERM, so a SIGKILL skips the EXIT
+# trap), and the hard link keeps that dump's space in use. Remove those, but never a pin of a
+# restore pod restore.sh saw still running (KEEP_PINS: pod names), nor this Job's own.
+mkdir -p "$root/restoring"
+for p in "$root"/restoring/*.dump; do
+  [ -e "$p" ] || continue
+  name="$(basename "$p" .dump)"
+  [ "$p" != "$pin" ] || continue
+  if [[ " ${KEEP_PINS:-} " == *" $name "* ]]; then echo "keeping pin of running restore pod $name"; continue; fi
+  rm -fv "$p"
+done
+rm -f "$pin"
+ln "$DUMP" "$pin"
+pinned=1
+pg_restore -l "$pin" > /dev/null
+
 echo "dump readable: $DUMP ($(pg_restore -l "$pin" | grep -c ' TABLE DATA ' || true) tables with data)"
 
 # Safety copy of the database as it is now, before anything is dropped. Pruning to the newest 5
 # happens only after a successful restore, and never removes the dump being restored.
-mkdir -p /backups/pre-restore
-rm -f /backups/pre-restore/*.partial
-safety="/backups/pre-restore/$(date -u +%Y%m%dT%H%M%SZ)-${HOSTNAME:-local}.dump"
+mkdir -p "$root/pre-restore"
+rm -f "$root"/pre-restore/*.partial
+safety="$root/pre-restore/$(date -u +%Y%m%dT%H%M%SZ)-${HOSTNAME:-local}.dump"
 test ! -e "$safety"
 pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -f "$safety.partial"
 pg_restore -l "$safety.partial" > /dev/null
@@ -71,6 +95,6 @@ SQL
   echo 'COMMIT;'
 } | psql -X -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" > /dev/null
 echo "restore committed"
-ls -1t /backups/pre-restore/*.dump | grep -vxF "$DUMP" | tail -n +6 | xargs -r rm -fv || true
+ls -1t "$root"/pre-restore/*.dump | grep -vxF "$DUMP" | tail -n +6 | xargs -r rm -fv || true
 after="$(db_version)" || after="(unreadable)"
 echo "alembic_version after restore: $after"
