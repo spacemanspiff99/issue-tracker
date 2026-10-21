@@ -62,4 +62,4 @@ See `.claude/skills/ui-playwright/SKILL.md` (Run it).
 
 Stop when the suite and CI artifact are green, or record the failing workflow step with its screenshot.
 
-Remaining: the last AC needs one owner-approved `local-pipeline.yml` run with `run_browser_uat: true` to dev or UAT (never `promote_prod`, see Issue 0035). Then tick it with the run URL and set `Status: done`.
+Remaining: the last AC needs one owner-approved `local-pipeline.yml` run with `run_browser_uat: true` to dev or UAT (never `promote_prod`, see Issue 0038). Then tick it with the run URL and set `Status: done`.

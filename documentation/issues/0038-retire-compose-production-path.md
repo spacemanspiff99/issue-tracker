@@ -1,4 +1,4 @@
-# Issue 0035: Retire The 192.168.10.8 Compose Production Path In Pipeline And Docs
+# Issue 0038: Retire The 192.168.10.8 Compose Production Path In Pipeline And Docs
 
 Status: backlog
 Recommended model: claude-opus-5-5 high

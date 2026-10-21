@@ -15,7 +15,7 @@ description: Use when editing `deployment/` (Dockerfile, compose files, `remote-
   production deploy**.
 - **Retired:** Compose production on `192.168.10.8`. `local-pipeline.yml` still has its job
   (`deploy-prod`, inputs `prod_host`/`promote_prod`, `environment: prod`, `needs: deploy-uat`,
-  refuses a SHA other than UAT's). Never dispatch with `promote_prod: true`; removal is Issue 0035.
+  refuses a SHA other than UAT's). Never dispatch with `promote_prod: true`; removal is Issue 0038.
 - Compose hosts: dev `192.168.10.20`; legacy UAT `192.168.10.18` (replaced by k3s UAT for
   releases). User `akun`, path `/home/akun/issue-tracker`. Don't invent other hosts.
 - Cloud sessions run in Anthropic's cloud and cannot reach `192.168.10.x` or the cluster; LAN
