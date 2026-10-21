@@ -1,6 +1,6 @@
 # Issue 0041: k3s Cutover Polish Before The First Real Run
 
-Status: in-progress (PR #25, review-3 fixes green on c9fb9c6; awaiting re-review)
+Status: done (PR #25, merged as `12b5ef3`; round-4 follow-ups in Issue 0042)
 Recommended model: claude-opus-5-5 high
 Category gates: `IT-6`
 Sprint: Sprint 0007

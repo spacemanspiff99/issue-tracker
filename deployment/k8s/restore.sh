@@ -8,6 +8,8 @@
 # Usage: CONFIRM=<namespace> deployment/k8s/restore.sh <uat|prod> </backups/...dump> [--require-empty] [--keep-app-down]
 #   --require-empty  refuse unless the projects table is absent or empty (first cutover only)
 #   --keep-app-down  leave the app at 0 replicas afterwards (rollback: set the old image first)
+# Without --keep-app-down the app returns to its previous replica count only if alembic_version is
+# the same before and after the restore; a dump at another revision leaves the app at 0.
 set -euo pipefail
 
 env_name="${1:?usage: restore.sh <uat|prod> <dump-path> [--require-empty] [--keep-app-down]}"
@@ -93,7 +95,15 @@ kubectl -n "$ns" create configmap issue-tracker-restore-script --from-file=resto
 
 job="issue-tracker-restore-$(date -u +%Y%m%d%H%M%S)"
 echo "context: $context namespace: $ns dump: $dump require_empty: $require_empty job: $job"
-kubectl -n "$ns" apply -f - <<YAML
+# Re-check right before the Job: another restore may have started while this one stopped the app.
+# `create` (not apply) also fails if a Job with this name already exists.
+active="$(kubectl -n "$ns" get jobs -l app.kubernetes.io/component=restore -o jsonpath='{range .items[*]}{.status.active}{end}')"
+if [ -n "$active" ]; then
+  echo "refusing: another restore Job started in $ns while this one was stopping the app; app left at 0." >&2
+  echo "Check: kubectl -n $ns get jobs -l app.kubernetes.io/component=restore; then see documentation/guides/k3s.md, Found the app at 0 replicas." >&2
+  exit 1
+fi
+kubectl -n "$ns" create -f - <<YAML
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -188,6 +198,15 @@ if [ "$status" = failed ]; then
   exit 1
 fi
 
+# Success. The app's current image only fits the restored data if the schema revision is the one it
+# was running on: the Job logs alembic_version before and after. Unreadable or different -> app at 0.
+v_before="" v_after="" schema_same=0
+if [ "$logs_ok" = 1 ]; then
+  v_before="$(sed -n 's/^alembic_version before restore: //p' <<< "$logs")"
+  v_after="$(sed -n 's/^alembic_version after restore: //p' <<< "$logs")"
+fi
+[[ -n "$v_before" && "$v_before" = "$v_after" && "$v_before" != "("* ]] && schema_same=1
+
 if [ "$keep_down" = 1 ]; then
   if [ "$has_app" = 1 ]; then
     echo "restored $dump into $ns; app left at 0 replicas (--keep-app-down)."
@@ -200,9 +219,20 @@ if [ "$keep_down" = 1 ]; then
   fi
   exit 0
 fi
-if [ "$has_app" = 1 ] && [ "$restore_app_to" -ge 1 ]; then
+if [ "$has_app" = 1 ] && [ "$restore_app_to" -ge 1 ] && [ "$schema_same" = 1 ]; then
   kubectl -n "$ns" scale deployment/issue-tracker --replicas="$restore_app_to"
   kubectl -n "$ns" rollout status deployment/issue-tracker --timeout=300s
+elif [ "$has_app" = 1 ] && [ "$restore_app_to" -ge 1 ]; then
+  if [ "$logs_ok" = 1 ]; then
+    echo "restored $dump into $ns, and alembic_version went from '${v_before:-unknown}' to '${v_after:-unknown}'." >&2
+  else
+    echo "restored $dump into $ns, but the Job logs could not be read to compare alembic_version." >&2
+  fi
+  echo "The app's current image may not match the restored schema, so the app is left at 0 replicas." >&2
+  echo "Next (documentation/guides/k3s.md, Rollback): kubectl -n $ns set image deployment/issue-tracker app=<image that matches ${v_after:-the restored revision}>" >&2
+  echo "then: kubectl -n $ns scale deployment/issue-tracker --replicas=$restore_app_to" >&2
+  echo "(or run the pipeline: its deploy backs up, migrates the restored data to its image's head and brings the app up)" >&2
+  exit 1
 elif [ "$has_app" = 1 ]; then
   echo "the app was at 0 replicas before this restore; leaving it at 0"
   echo "To bring it back: kubectl -n $ns scale deployment/issue-tracker --replicas=1"

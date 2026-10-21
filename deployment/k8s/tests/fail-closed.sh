@@ -18,7 +18,8 @@ export STUB_LOG="$work/calls.log" REAL_KUBECTL="$real_kubectl"
 # whose arguments contain the substring, as an API error would; with STUB_FAIL_ALWAYS=1 it fails
 # every such call. Otherwise the stub is a healthy cluster with the app at STUB_REPLICAS (1):
 # Jobs report STUB_JOB_STATUS ("succeeded/failed", default "1/"), Job logs print STUB_LOGS, and
-# /health reports ok.
+# /health reports ok. STUB_RESTORE_ACTIVE_FROM=N: from the Nth "restore Jobs active?" read on,
+# another restore Job reports active (one started meanwhile).
 cat > "$work/bin/kubectl" <<'STUB'
 #!/usr/bin/env bash
 echo "kubectl $*" >> "$STUB_LOG"
@@ -41,7 +42,10 @@ fi
 case "$args" in
   *" kustomize "*|*" set env "*|*" --dry-run=client "*) exec "$REAL_KUBECTL" "$@" ;;
   *" config current-context "*) echo issue-tracker-uat ;;
-  *" apply -f - "*) { echo "--- apply stdin:"; cat; } >> "$STUB_LOG" ;;
+  *" apply -f - "*|*" create -f - "*) { echo "--- apply stdin:"; cat; } >> "$STUB_LOG" ;;
+  *" get jobs -l app.kubernetes.io/component=restore "*)
+    n=$(( $(cat "$STUB_LOG.restore-reads" 2> /dev/null || echo 0) + 1 )); echo "$n" > "$STUB_LOG.restore-reads"
+    [ -z "${STUB_RESTORE_ACTIVE_FROM:-}" ] || [ "$n" -lt "$STUB_RESTORE_ACTIVE_FROM" ] || echo 1 ;;
   *" get pods "*) [ -z "${STUB_PODS:-}" ] || echo "$STUB_PODS" ;;
   *" get job "*"jsonpath={.status.succeeded}/{.status.failed}"*) echo "${STUB_JOB_STATUS:-1/}" ;;
   *" logs job/"*) printf '%s\n' "${STUB_LOGS:-}" ;;
@@ -66,14 +70,16 @@ run_case() {  # run_case <deploy|restore> <description> <STUB_FAIL entries or ->
   #   after-jobs   the case fails after all Jobs were applied (deploy migrate / restore Job)
   #   scale-back   must end with the old app scaled back to 1
   #   no-scale-up  must never scale the app above 0
+  #   exit0        the script must exit 0 (a successful restore) instead of failing
   # RESTORE_FLAGS (env) adds restore.sh options, e.g. --keep-app-down. EXPECT_OUTPUT (env): text
-  # the script's output must contain.
+  # the script's output must contain. EXPECT_REPLICAS (env): the last scale must be to this count,
+  # and no scale may go above it.
   local script="$1" desc="$2" fail="$3" opts=" ${4:-} " out="$work/out" always="" stub_fail="$3"
   # FC_ONLY (env): run only cases whose "[script] description" contains this text.
   [ -z "${FC_ONLY:-}" ] || [[ "[$script] $desc" == *"$FC_ONLY"* ]] || return 0
   [[ "$opts" == *" always "* ]] && always=1
   [ "$fail" != - ] || stub_fail=""   # "-": fail nothing; the case is driven by STUB_* state
-  : > "$STUB_LOG"; rm -f "$STUB_LOG".failed "$STUB_LOG".seen*
+  : > "$STUB_LOG"; rm -f "$STUB_LOG".failed "$STUB_LOG".seen* "$STUB_LOG".restore-reads
   if [ "$script" = deploy ]; then
     STUB_FAIL="$stub_fail" STUB_FAIL_ALWAYS="$always" "$here/deploy.sh" uat ghcr.io/spacemanspiff99/issue-tracker:test "$sha" > "$out" 2>&1 && rc=0 || rc=$?
   else
@@ -86,7 +92,11 @@ run_case() {  # run_case <deploy|restore> <description> <STUB_FAIL entries or ->
     [ "$(sort -u "$STUB_LOG.failed" 2> /dev/null | wc -l)" -eq "$n_entries" ] \
       || why="not every stubbed call in '$fail' was made"
   fi
-  [ -n "$why" ] || [ "$rc" -ne 0 ] || why="exited 0"
+  if [[ "$opts" == *" exit0 "* ]]; then
+    [ -n "$why" ] || [ "$rc" -eq 0 ] || why="exited $rc"
+  else
+    [ -n "$why" ] || [ "$rc" -ne 0 ] || why="exited 0"
+  fi
   if [ -z "$why" ] && [ "$script" = deploy ]; then
     if [[ "$opts" == *" after-jobs "* ]]; then :
     elif [[ "$opts" == *" after-backup "* ]]; then
@@ -107,6 +117,13 @@ run_case() {  # run_case <deploy|restore> <description> <STUB_FAIL entries or ->
   if [ -z "$why" ] && [[ "$opts" == *" scale-back "* ]] \
     && [ "$(grep -o 'scale deployment/issue-tracker --replicas=[0-9]*' "$STUB_LOG" | tail -1)" != "scale deployment/issue-tracker --replicas=1" ]; then
     why="did not scale the previous app back to 1"
+  fi
+  if [ -z "$why" ] && [ -n "${EXPECT_REPLICAS:-}" ]; then
+    local scales last
+    scales="$(grep -oE 'scale deployment/issue-tracker --replicas=[0-9]+' "$STUB_LOG" | sed 's/.*=//' | tr '\n' ' ')"
+    last="${scales% }"; last="${last##* }"
+    for n in $scales; do [ "$n" -le "$EXPECT_REPLICAS" ] || why="scaled above $EXPECT_REPLICAS: $scales"; done
+    [ -n "$why" ] || [ "$last" = "$EXPECT_REPLICAS" ] || why="did not end at $EXPECT_REPLICAS replica(s): ${scales:-no scale}"
   fi
   if [ -n "$why" ]; then
     echo "FAIL [$script] $desc: $why"; sed 's/^/    /' "$out"; failures=$((failures + 1))
@@ -152,8 +169,11 @@ run_case restore "scale app to 0"                     "scale deployment/issue-tr
 run_case restore "app pods gone?"                     "get pods -l app.kubernetes.io/component=web"
 run_case restore "restore-script ConfigMap"           "create configmap issue-tracker-restore-script"
 
-# restore.sh after the Job was applied: status, logs and delete must each fail closed.
-run_case restore "Job status unreadable (timeout)"    "get job issue-tracker-restore-" "always after-jobs no-scale-up"
+# restore.sh after the Job was applied: status, logs and delete must each fail closed. Logs that
+# show a committed same-revision restore, so a wrongly assumed success would scale the app up.
+same=$'alembic_version before restore: 0004_x\nrestore committed\nalembic_version after restore: 0004_x'
+older=$'alembic_version before restore: 0004_x\nrestore committed\nalembic_version after restore: 0003_y'
+STUB_LOGS="$same" run_case restore "Job status unreadable (timeout)" "get job issue-tracker-restore-" "always after-jobs no-scale-up"
 STUB_JOB_STATUS=/1 run_case restore "Job failed, logs unreadable" "logs job/issue-tracker-restore-" "after-jobs no-scale-up"
 STUB_JOB_STATUS=/ EXPECT_OUTPUT="could NOT be confirmed deleted" \
   run_case restore "timeout, Job delete fails" "delete job issue-tracker-restore-" "after-jobs no-scale-up"
@@ -164,6 +184,19 @@ STUB_JOB_STATUS=/1 run_case restore "Job failed before COMMIT (control)" - "afte
 STUB_REPLICAS=0 STUB_JOB_STATUS=/1 RESTORE_FLAGS=--keep-app-down run_case restore "app at 0, --keep-app-down, failed before COMMIT (B1)" - "after-jobs no-scale-up"
 STUB_REPLICAS=0 STUB_JOB_STATUS=/1 run_case restore "app at 0, failed before COMMIT (B1)" - "after-jobs no-scale-up"
 STUB_JOB_STATUS=/1 RESTORE_FLAGS=--keep-app-down run_case restore "--keep-app-down, failed before COMMIT (B1)" - "after-jobs no-scale-up"
+
+# Issue 0042. A successful restore returns the app to its previous count (never above, 0 stays 0)
+# only when the Job's logs show the same alembic_version before and after (N1, N3).
+STUB_LOGS="$same" EXPECT_REPLICAS=1 run_case restore "success, same schema, app at 1 -> 1 (N3)" - "after-jobs exit0"
+STUB_LOGS="$same" STUB_REPLICAS=2 EXPECT_REPLICAS=2 run_case restore "success, same schema, app at 2 -> 2 (N3)" - "after-jobs exit0"
+STUB_LOGS="$same" STUB_REPLICAS=0 run_case restore "success, app at 0 stays at 0 (N3)" - "after-jobs exit0 no-scale-up"
+STUB_JOB_STATUS=/1 STUB_REPLICAS=2 EXPECT_REPLICAS=2 run_case restore "failed before COMMIT, app at 2 -> 2 (N3)" - after-jobs
+STUB_LOGS="$older" EXPECT_OUTPUT="from '0004_x' to '0003_y'" \
+  run_case restore "success, schema changed: app left at 0 (N1)" - "after-jobs no-scale-up"
+STUB_LOGS="restore committed" run_case restore "success, versions not in the logs: app left at 0 (N1)" - "after-jobs no-scale-up"
+run_case restore "success, logs unreadable: app left at 0 (N1)" "logs job/issue-tracker-restore-" "after-jobs no-scale-up"
+# N4: another restore starts while this one is stopping the app; re-checked just before the Job.
+STUB_RESTORE_ACTIVE_FROM=2 run_case restore "another restore started meanwhile (N4)" -
 
 if [ "$failures" -ne 0 ]; then
   echo "$failures fail-closed case(s) FAILED" >&2
