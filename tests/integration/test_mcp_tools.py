@@ -193,3 +193,48 @@ def test_mcp_smoke_lists_expected_tools():
     assert "rule.resolve" in result["tools"]
     assert "prompt.lint" in result["tools"]
     assert "sync.next_actions" in result["tools"]
+
+
+def _registered_server(engine):
+    from sqlalchemy.orm import sessionmaker
+
+    return server.build_server(sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
+
+
+def _call(mcp, name, arguments):
+    import asyncio
+    import json
+
+    content = asyncio.run(mcp.call_tool(name, arguments))
+    if isinstance(content, tuple):  # newer mcp versions return (content, structured)
+        content = content[0]
+    return json.loads(content[0].text)
+
+
+def test_registered_issue_search_forwards_arguments_by_keyword(engine, session):
+    project = ProjectService(session).create_project("Tracker")
+    IssueService(session).create_issue(project.id, "Wired search", "- [ ] hidden by default")
+    mcp = _registered_server(engine)
+
+    default = _call(mcp, "issue.search", {"project_id": project.id})
+    queried = _call(mcp, "issue.search", {"project_id": project.id, "query": "Wired", "limit": 5})
+
+    assert [issue["title"] for issue in default["issues"]] == ["Wired search"]
+    assert "acceptance_criteria" not in default["issues"][0]
+    assert default["limit"] == 20
+    assert [issue["title"] for issue in queried["issues"]] == ["Wired search"]
+    assert queried["limit"] == 5
+
+
+def test_registered_tools_match_smoke_list_and_tool_signatures(engine):
+    import asyncio
+    import inspect
+
+    mcp = _registered_server(engine)
+    registered = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+
+    assert set(registered) == set(server.smoke()["tools"])
+    for name, tool in registered.items():
+        fn = getattr(tools, name.replace(".", "_"))
+        expected = set(inspect.signature(fn).parameters) - {"session"}
+        assert set(tool.inputSchema.get("properties", {})) == expected, name
