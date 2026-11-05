@@ -187,35 +187,31 @@ Add timestamped entries here as phases run.
 - 2026-11-05: Reconciliation (Claude Code). Closed `0141` with the 0168 browser and preflight evidence. Left `0143` open with a gap comment: no hover/focus or overlap evidence for tooltips. Added `0177` "Fix MCP issue.search positional argument wiring" to this sprint. MCP `issue.search` with `project_id` raised `AttributeError` because `server.py` passed arguments by position; fixed on `fix/mcp-issue-search-wiring` with server-level tests.
 - 2026-11-05: **`0173` blocked (owner decision).** A read-only SSH check of `app-uat` (`192.168.10.26`) found no `/home/akun/issue-tracker`, no issue-tracker containers or volumes, and nothing on `:8000`. The host now runs weather-app UAT and other containers; it last booted 2026-10-31. The prior UAT install and its seeded data are gone, so a retry is a fresh install with an empty UAT database, not a data-preserving code deploy. `uat.issue-tracker.akun` and `issue-tracker.akun` do not resolve from the dev host. `APP_HEALTHCHECK_URL` is now consumed by `deployment/scripts/remote-compose-deploy.sh`. Retry condition: the owner chooses the UAT target and data policy, and confirms whether the HTTPS hostnames and proxy exist.
 - 2026-11-05: **Owner decision:** UAT moves to the dev host `192.168.10.20` (`cursor-issue-tracker`), and the domain is `it.462111.xyz`. Branch `deploy/uat-on-dev-host` isolates UAT from the live dev stack: compose project `issue_tracker_uat`, container `issue-tracker-uat-postgres`, volume `issue_tracker_uat_issue_tracker_pgdata`, port `8100`, and deploy path `/home/akun/issue-tracker-uat`. The deploy script refuses UAT configs that reuse dev names, paths, or ports; the guards were verified locally. URLs: `https://uat.it.462111.xyz` for UAT and `https://it.462111.xyz` for prod, with `dev.it.462111.xyz` reserved for the dev app. None of these resolve yet; health checks use the direct URL. The MCP fix is in PR #34, which is open into `dev`; `0177` is closed with that reference.
-- 2026-11-05: **Remaining `0173` blockers (owner actions):** (1) the only Actions runner, `issue-tracker-lxc-113`, is **offline**, and it must be brought back online; (2) `akun@192.168.10.20` must accept the `LOCAL_DEPLOY_SSH_KEY` from the runner, and the runner's known_hosts must include `192.168.10.20`; (3) the first UAT deploy on this host creates an **empty** UAT database, and seeding it from dev is a separate `/data-refresh` with `CONFIRM OVERWRITE uat`. Retry condition: `gh api repos/spacemanspiff99/issue-tracker/actions/runners` shows the runner `online`, and the deploy-branch PR is merged to `dev`.
+- 2026-11-05: **Superseded by the local-deploy decision below.** Earlier remaining `0173` blockers: (1) the only Actions runner, `issue-tracker-lxc-113`, is **offline**, and it must be brought back online; (2) `akun@192.168.10.20` must accept the `LOCAL_DEPLOY_SSH_KEY` from the runner, and the runner's known_hosts must include `192.168.10.20`; (3) the first UAT deploy on this host creates an **empty** UAT database, and seeding it from dev is a separate `/data-refresh` with `CONFIRM OVERWRITE uat`. Retry condition: `gh api repos/spacemanspiff99/issue-tracker/actions/runners` shows the runner `online`, and the deploy-branch PR is merged to `dev`.
+
+- 2026-11-05: **Owner decision: no runners.** UAT deploys locally via `deployment/scripts/local-uat-deploy.sh` (`TARGET_MODE=local`, source from `git archive <sha>`), so the runner and SSH blockers no longer apply. An empty first UAT database is accepted. Production moves to k3s with a shared Postgres (`0178`, `documentation/issues/0178-prod-k3s-shared-postgres.md`). The dry run passed for `e8839cd0d6910b3e1303eb63394839245172283d`, and the guards refused short, unpushed, wrong-IP, wrong-hostname, and dev-project cases with no side effects.
 
 ## UAT Deploy Gate
 
-Prepared operation:
+Prepared operation (local, no runners; owner decision 2026-11-05):
 
-- Workflow: `.github/workflows/local-pipeline.yml` (`App Deploy Pipeline`; listed by `gh workflow list` as `Local Dev UAT Pipeline`).
-- Ref: `dev` (was `deploy/app-host-targets-0112`, merged into `dev` in `96d046d`).
-- Expected deploy SHA: use the exact final `git rev-parse HEAD` value after all source-control commits are complete and after confirming the remote ref matches.
-- Target: UAT on the dev host `192.168.10.20` (`cursor-issue-tracker`), deploy path `/home/akun/issue-tracker-uat`, compose project `issue_tracker_uat`, port `8100`, user `akun`.
-- Production deploy: `false`.
-- Data policy: code deploy only. On this host the first deploy creates a new, empty UAT volume. It must never touch the dev volume `deployment_issue_tracker_pgdata`. Do not overwrite, restore, reset, or refresh UAT data without `CONFIRM OVERWRITE uat`.
+- Command: `deployment/scripts/local-uat-deploy.sh <sha>`, run on the dev host `192.168.10.20` (`cursor-issue-tracker`).
+- Ref: `origin/dev` after PRs #34 and #35 merge. The SHA must be the full pushed commit.
+- Target: compose project `issue_tracker_uat`, container `issue-tracker-uat-postgres`, volume `issue_tracker_uat_issue_tracker_pgdata`, port `8100`, path `/home/akun/issue-tracker-uat`.
+- Data policy: code deploy only. The first deploy creates an empty UAT database, which the owner accepted on 2026-11-05. It never touches the dev volume `deployment_issue_tracker_pgdata`. Seeding from dev requires `CONFIRM OVERWRITE uat`.
+- Rollback: repoint `/home/akun/issue-tracker-uat/current` to the previous release and run `docker compose up -d` with the UAT env. The DB is forward-only, so if a restore is ever needed, use the pre-migration dump under `/home/akun/issue-tracker-uat/backups/<release>/`. On the first deploy, rollback means stopping the UAT stack.
+- Production: not part of this gate. See `0178` (k3s with a shared Postgres).
 
-Dispatch command when explicitly approved:
+Commands:
 
 ```bash
-gh workflow run local-pipeline.yml \
-  --ref dev \
-  -f uat_host=192.168.10.20 \
-  -f prod_host=192.168.10.27 \
-  -f deploy_user=akun \
-  -f deploy_path=/home/akun/issue-tracker \
-  -f uat_deploy_path=/home/akun/issue-tracker-uat \
-  -f prod_env_file=/home/akun/issue-tracker/prod.env \
-  -f deploy_prod=false \
-  -f expected_deploy_sha=<exact-current-sha>
+git fetch origin && sha=$(git rev-parse origin/dev)
+DEPLOY_DRY_RUN=1 deployment/scripts/local-uat-deploy.sh "$sha"
+deployment/scripts/local-uat-deploy.sh "$sha"
+curl -fsS http://192.168.10.20:8100/health
 ```
 
-STOP: Do not dispatch this workflow until the exact final ref/SHA is stated and the user explicitly approves deploying that exact ref/SHA to UAT with UAT data preserved.
+STOP: Do not run the non-dry-run command until the exact SHA is stated and the owner explicitly approves deploying it to UAT.
 
 ## STOP
 

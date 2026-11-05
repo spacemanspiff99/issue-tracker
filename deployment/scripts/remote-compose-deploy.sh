@@ -24,7 +24,10 @@ skip_db_backup="${SKIP_DB_BACKUP:-0}"
 run_tests="${RUN_TESTS:-0}"
 run_ruff="${RUN_RUFF:-0}"
 expected_deploy_sha="${EXPECTED_DEPLOY_SHA:-}"
-release_id="${GITHUB_SHA:-manual}-$(date -u +%Y%m%d%H%M%S)"
+# TARGET_MODE=ssh (default) copies to TARGET_HOST over SSH. TARGET_MODE=local deploys onto this
+# machine without SSH or GitHub Actions; the source is `git archive` of EXPECTED_DEPLOY_SHA.
+target_mode="${TARGET_MODE:-ssh}"
+dry_run="${DEPLOY_DRY_RUN:-0}"
 remote="${target_user}@${target_host}"
 ssh_opts=(-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=10 -o ServerAliveCountMax=3)
 if [ -n "${DEPLOY_SSH_KEY_PATH:-}" ]; then
@@ -48,6 +51,35 @@ if [ "$deploy_environment" = "prod" ] && [ "$skip_db_backup" = "1" ]; then
   echo "Refusing prod deploy: SKIP_DB_BACKUP=1 is not allowed" >&2
   exit 2
 fi
+
+case "$target_mode" in
+  ssh) ;;
+  local)
+    if [ -z "$expected_deploy_sha" ]; then
+      echo "Refusing local deploy: EXPECTED_DEPLOY_SHA is required" >&2
+      exit 2
+    fi
+    if ! resolved_sha="$(git rev-parse --verify --quiet "${expected_deploy_sha}^{commit}")" || [ "$resolved_sha" != "$expected_deploy_sha" ]; then
+      echo "Refusing local deploy: EXPECTED_DEPLOY_SHA must be a full 40-char commit SHA present locally" >&2
+      exit 2
+    fi
+    if [ -z "$(git branch -r --contains "$expected_deploy_sha" 2>/dev/null)" ]; then
+      echo "Refusing local deploy: $expected_deploy_sha is not on any pushed remote branch (run git fetch, push first)" >&2
+      exit 2
+    fi
+    if ! hostname -I 2>/dev/null | tr ' ' '\n' | grep -qx "$target_host"; then
+      echo "Refusing local deploy: TARGET_HOST '$target_host' is not an address of this machine" >&2
+      exit 2
+    fi
+    GITHUB_SHA="$expected_deploy_sha"
+    GITHUB_REF="local:$(git branch -r --contains "$expected_deploy_sha" | sed 's/^ *//' | paste -sd, -)"
+    ;;
+  *)
+    echo "Refusing deploy: TARGET_MODE must be ssh or local (got '$target_mode')" >&2
+    exit 2
+    ;;
+esac
+release_id="${GITHUB_SHA:-manual}-$(date -u +%Y%m%d%H%M%S)"
 
 if [ -n "$expected_deploy_sha" ] && [ "${GITHUB_SHA:-}" != "$expected_deploy_sha" ]; then
   echo "Refusing $deploy_environment deploy: GITHUB_SHA '${GITHUB_SHA:-}' does not match EXPECTED_DEPLOY_SHA '$expected_deploy_sha'" >&2
@@ -96,6 +128,15 @@ if [ "$deploy_environment" = "uat" ]; then
   fi
 fi
 
+target_run() {
+  if [ "$target_mode" = "local" ]; then
+    bash -c "$1"
+  else
+    ssh "${ssh_opts[@]}" "$remote" "$1"
+  fi
+}
+
+echo "Deploy mode: $target_mode"
 echo "Deploy source ref: ${GITHUB_REF:-manual}"
 echo "Deploy source sha: ${GITHUB_SHA:-manual}"
 echo "Deploy target environment: ${deploy_environment:-unspecified}"
@@ -103,7 +144,7 @@ echo "Deploy path: $deploy_path"
 echo "Health check: $app_healthcheck_url"
 
 if [ -n "$expected_target_hostname" ]; then
-  actual_hostname="$(ssh "${ssh_opts[@]}" "$remote" "hostname")"
+  actual_hostname="$(target_run "hostname")"
   if [ "$actual_hostname" != "$expected_target_hostname" ]; then
     echo "Refusing $deploy_environment deploy: remote hostname '$actual_hostname' does not match expected '$expected_target_hostname'" >&2
     exit 2
@@ -111,24 +152,34 @@ if [ -n "$expected_target_hostname" ]; then
 fi
 
 if [ -n "$remote_env_file" ]; then
-  ssh "${ssh_opts[@]}" "$remote" "test -f '$remote_env_file'"
+  target_run "test -f '$remote_env_file'"
 fi
 
-ssh "${ssh_opts[@]}" "$remote" "mkdir -p '$deploy_path/releases'"
+if [ "$dry_run" = "1" ]; then
+  echo "DRY RUN: all guards passed; would deploy ${GITHUB_SHA:-manual} to $deploy_path/releases/$release_id. No changes made."
+  exit 0
+fi
 
-tar \
-  --exclude .git \
-  --exclude .venv \
-  --exclude .pytest_cache \
-  --exclude .ruff_cache \
-  --exclude exports \
-  --exclude backups \
-  --exclude '*.pyc' \
-  -czf - . |
-  ssh "${ssh_opts[@]}" "$remote" \
-    "mkdir -p '$deploy_path/releases/$release_id' && tar -xzf - -C '$deploy_path/releases/$release_id'"
+target_run "mkdir -p '$deploy_path/releases'"
 
-ssh "${ssh_opts[@]}" "$remote" \
+unpack="mkdir -p '$deploy_path/releases/$release_id' && tar -xzf - -C '$deploy_path/releases/$release_id'"
+if [ "$target_mode" = "local" ]; then
+  # Committed tree only: uncommitted dev-checkout changes can never reach UAT.
+  git archive --format=tar.gz "$expected_deploy_sha" | target_run "$unpack"
+else
+  tar \
+    --exclude .git \
+    --exclude .venv \
+    --exclude .pytest_cache \
+    --exclude .ruff_cache \
+    --exclude exports \
+    --exclude backups \
+    --exclude '*.pyc' \
+    -czf - . |
+    target_run "$unpack"
+fi
+
+target_run \
   "set -euo pipefail
    if [ -n '$remote_env_file' ]; then
      set -a
@@ -214,4 +265,4 @@ ssh "${ssh_opts[@]}" "$remote" \
      fi
    fi"
 
-echo "Deployed ${GITHUB_SHA:-manual} to ${deploy_environment:-unspecified} at $remote:$deploy_path/current"
+echo "Deployed ${GITHUB_SHA:-manual} to ${deploy_environment:-unspecified} ($target_mode) at $remote:$deploy_path/current"

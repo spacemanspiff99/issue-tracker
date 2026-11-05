@@ -1,3 +1,6 @@
+# SUPERSEDED 2026-11-05: no self-hosted runners are used. UAT deploys locally via
+# deployment/scripts/local-uat-deploy.sh; production moves to k3s (issue 0178,
+# documentation/issues/0178-prod-k3s-shared-postgres.md). Do not dispatch.
 name: App Deploy Pipeline
 
 on:

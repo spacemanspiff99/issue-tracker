@@ -52,7 +52,25 @@ The local runner pipeline creates a compressed custom-format `pg_dump` before mi
 
 Restore is intentionally manual. Inspect the target and use PostgreSQL tools such as `pg_restore` from a known-good backup; do not add automatic restore or rollback that could overwrite live data without human approval.
 
-## Local Runner UAT -> Production Pipeline
+## Local UAT Deploy (No Runners)
+
+UAT deploys run from the dev host itself. No GitHub Actions runner or SSH is involved:
+
+```bash
+git fetch origin
+sha=$(git rev-parse origin/dev)          # exact pushed commit to deploy
+DEPLOY_DRY_RUN=1 deployment/scripts/local-uat-deploy.sh "$sha"   # guards only, no changes
+deployment/scripts/local-uat-deploy.sh "$sha"                    # deploy after explicit approval
+curl -fsS http://192.168.10.20:8100/health
+```
+
+`local-uat-deploy.sh` runs `remote-compose-deploy.sh` with `TARGET_MODE=local`. It refuses any SHA that is short, missing locally, or not on a pushed remote branch. It also refuses when `TARGET_HOST` is not an address of this machine or the hostname is not `cursor-issue-tracker`, along with all of the co-hosting guards below. The release is built from `git archive <sha>`, so uncommitted changes in the dev checkout are never deployed. It then takes a pre-migration UAT backup, runs `alembic upgrade head`, the test suite, ruff, `/health`, MCP smoke, and browser UAT inside the UAT stack.
+
+Production is moving to k3s with a shared PostgreSQL. See `documentation/issues/0178-prod-k3s-shared-postgres.md`. Until that lands, there is no supported production deploy path.
+
+## Superseded: Local Runner UAT -> Production Pipeline
+
+As of 2026-11-05 the self-hosted runner pipeline below is not used (owner decision: no runners). It is kept for reference until issue `0178` retires it. Do not dispatch it.
 
 Use `.github/workflows/local-pipeline.yml` for the local network pipeline:
 
