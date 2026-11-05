@@ -1,6 +1,6 @@
 # Sprint Plan: AI Coding Workflow UX Reset Implementation
 
-Status: draft sprint plan, backlog created, implementation not started
+Status: partially implemented. `a031ded` (2026-05-26) shipped derived workflow states, cancelled status (migration `0004`), saved backlog views, and intake/board/overview changes. Tracker issues `0154`-`0167` are still `backlog` and need a per-issue AC audit before any are closed.
 
 Created: 2026-05-25
 
@@ -278,6 +278,8 @@ The app is ready for manual UAT when:
 
 - 2026-05-26: Follow-on overnight sprint `0168` was created to finish dev readiness, source-control closeout, UAT deploy, and comprehensive UAT.
 - 2026-05-26: Local dev preflight passed in the `0168` sprint. Evidence is recorded in `documentation/uat/2026-05-26-sprint-0168-dev-preflight.md`.
+
+- 2026-11-05: Reconciliation found implementation drift: `a031ded` covers part of `0155`-`0167`, but no tracker issue was closed. Per-issue AC audit is pending.
 
 ## STOP
 

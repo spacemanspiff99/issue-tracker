@@ -11,7 +11,14 @@ deploy_path="${DEPLOY_PATH:-/home/akun/issue-tracker}"
 compose_file="${COMPOSE_FILE:-deployment/docker-compose.local.yml}"
 remote_env_file="${REMOTE_ENV_FILE:-}"
 app_base_url="${APP_BASE_URL:-http://${target_host}:8000}"
+# Public APP_BASE_URL may be an HTTPS proxy hostname the target host cannot resolve or trust;
+# health is checked on the target host directly unless APP_HEALTHCHECK_URL overrides it.
+app_healthcheck_url="${APP_HEALTHCHECK_URL:-${app_base_url}/health}"
 app_http_port="${APP_HTTP_PORT:-8000}"
+# Isolation for co-hosted stacks (UAT on the dev host). Empty keeps compose defaults,
+# which is what existing single-purpose hosts (prod) rely on for their volume names.
+compose_project_name="${COMPOSE_PROJECT_NAME:-}"
+postgres_container_name="${POSTGRES_CONTAINER_NAME:-}"
 run_browser_uat="${RUN_BROWSER_UAT:-0}"
 skip_db_backup="${SKIP_DB_BACKUP:-0}"
 run_tests="${RUN_TESTS:-0}"
@@ -56,16 +63,44 @@ if [ -z "$app_environment" ]; then
 fi
 
 case "$deploy_path" in
-  /home/*/issue-tracker|/opt/issue-tracker|/srv/issue-tracker) ;;
+  /home/*/issue-tracker|/home/*/issue-tracker-uat|/opt/issue-tracker|/srv/issue-tracker) ;;
   *)
     echo "Refusing unsafe DEPLOY_PATH: $deploy_path" >&2
     exit 2
     ;;
 esac
 
+if [ "$deploy_environment" = "uat" ]; then
+  # UAT shares a host with the live dev app: it must never reuse the dev compose project,
+  # dev checkout, dev postgres container, or dev port.
+  case "$compose_project_name" in
+    ""|deployment)
+      echo "Refusing uat deploy: COMPOSE_PROJECT_NAME must be set to a UAT-only name (got '${compose_project_name}')" >&2
+      exit 2
+      ;;
+  esac
+  if [ -z "$postgres_container_name" ] || [ "$postgres_container_name" = "issue-tracker-postgres" ]; then
+    echo "Refusing uat deploy: POSTGRES_CONTAINER_NAME must be set to a UAT-only name" >&2
+    exit 2
+  fi
+  case "$deploy_path" in
+    */issue-tracker-uat) ;;
+    *)
+      echo "Refusing uat deploy: DEPLOY_PATH must end in issue-tracker-uat (got '$deploy_path')" >&2
+      exit 2
+      ;;
+  esac
+  if [ "$app_http_port" = "8000" ] || [ "$app_http_port" = "8443" ]; then
+    echo "Refusing uat deploy: APP_HTTP_PORT $app_http_port is reserved for the dev app" >&2
+    exit 2
+  fi
+fi
+
 echo "Deploy source ref: ${GITHUB_REF:-manual}"
 echo "Deploy source sha: ${GITHUB_SHA:-manual}"
 echo "Deploy target environment: ${deploy_environment:-unspecified}"
+echo "Deploy path: $deploy_path"
+echo "Health check: $app_healthcheck_url"
 
 if [ -n "$expected_target_hostname" ]; then
   actual_hostname="$(ssh "${ssh_opts[@]}" "$remote" "hostname")"
@@ -109,6 +144,9 @@ ssh "${ssh_opts[@]}" "$remote" \
    chmod -R u+rwX,go+rwX exports backups
    export APP_BASE_URL='$app_base_url'
    export APP_HTTP_PORT='$app_http_port'
+   if [ -n '$compose_project_name' ]; then export COMPOSE_PROJECT_NAME='$compose_project_name'; fi
+   if [ -n '$postgres_container_name' ]; then export POSTGRES_CONTAINER_NAME='$postgres_container_name'; fi
+   echo "Compose project: \${COMPOSE_PROJECT_NAME:-<default>}"
    export APP_ENVIRONMENT='$app_environment'
    if [ '$deploy_environment' = 'prod' ]; then
      for required_name in APP_SECRET_KEY DATABASE_URL POSTGRES_PASSWORD; do
@@ -159,7 +197,7 @@ ssh "${ssh_opts[@]}" "$remote" \
    fi
    docker compose -f '$compose_file' up -d
    for attempt in 1 2 3 4 5 6 7 8 9 10; do
-     if curl -fsS '$app_base_url/health'; then
+     if curl -fsS '$app_healthcheck_url'; then
        break
      fi
      if [ \"\$attempt\" = 10 ]; then

@@ -42,7 +42,7 @@ Project planning remains in `documentation/planning/PROJECT_PLAN.md`; recurring 
 
 Current planning additions:
 
-- `documentation/guides/deployment.md` includes the local GitHub Actions runner pipeline for UAT at `192.168.10.26` and production at `192.168.10.27`.
+- `documentation/guides/deployment.md` includes the local GitHub Actions runner pipeline for UAT at `192.168.10.20` (isolated stack on the dev host, port `8100`) and production at `192.168.10.27`.
 - `documentation/guides/comprehensive-test-plan.md` defines the production-safety test gates for backup, restore, Guidance Sync, MCP, migrations, import/export, UAT, and deployment behavior.
 - `documentation/guides/product-guide.md` explains the purpose of the software and the current web, voice intake, release, sprint, issue, project, import/export, and MCP functionality.
 - `documentation/guides/issue-tracker-ux-flow-map.md` records the Sprint 0140 human and AI-agent flow baseline for intake, backlog, board, sprints, releases, categories, and issue detail.

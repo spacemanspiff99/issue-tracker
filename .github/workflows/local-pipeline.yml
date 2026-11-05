@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       uat_host:
-        description: UAT host
+        description: UAT host (co-hosted with the dev app on cursor-issue-tracker)
         required: true
-        default: 192.168.10.26
+        default: 192.168.10.20
       prod_host:
         description: Production host
         required: true
@@ -16,9 +16,13 @@ on:
         required: true
         default: akun
       deploy_path:
-        description: Remote deployment path
+        description: Remote deployment path for production
         required: true
         default: /home/akun/issue-tracker
+      uat_deploy_path:
+        description: Remote deployment path for UAT (must not be the dev checkout)
+        required: true
+        default: /home/akun/issue-tracker-uat
       prod_env_file:
         description: Remote production env file path on app-prod
         required: true
@@ -53,18 +57,22 @@ jobs:
           echo "Deploying ref: $GITHUB_REF"
           echo "Deploying sha: $GITHUB_SHA"
           test "$GITHUB_SHA" = "$EXPECTED_DEPLOY_SHA"
-      - name: Deploy to app-uat
+      - name: Deploy UAT to cursor-issue-tracker
         env:
           DEPLOY_ENVIRONMENT: uat
           APP_ENVIRONMENT: uat
           EXPECTED_DEPLOY_SHA: ${{ inputs.expected_deploy_sha }}
           TARGET_HOST: ${{ inputs.uat_host }}
-          EXPECTED_TARGET_HOST: 192.168.10.26
-          EXPECTED_TARGET_HOSTNAME: app-uat
+          EXPECTED_TARGET_HOST: 192.168.10.20
+          EXPECTED_TARGET_HOSTNAME: cursor-issue-tracker
           TARGET_USER: ${{ inputs.deploy_user }}
-          DEPLOY_PATH: ${{ inputs.deploy_path }}
-          APP_BASE_URL: http://${{ inputs.uat_host }}:8000
-          APP_HTTP_PORT: "8000"
+          DEPLOY_PATH: ${{ inputs.uat_deploy_path }}
+          # Isolated from the live dev stack (project "deployment", container issue-tracker-postgres, port 8000).
+          COMPOSE_PROJECT_NAME: issue_tracker_uat
+          POSTGRES_CONTAINER_NAME: issue-tracker-uat-postgres
+          APP_BASE_URL: https://uat.it.462111.xyz
+          APP_HEALTHCHECK_URL: http://${{ inputs.uat_host }}:8100/health
+          APP_HTTP_PORT: "8100"
           RUN_BROWSER_UAT: "1"
           RUN_TESTS: "1"
           RUN_RUFF: "1"
@@ -97,7 +105,8 @@ jobs:
           TARGET_USER: ${{ inputs.deploy_user }}
           DEPLOY_PATH: ${{ inputs.deploy_path }}
           REMOTE_ENV_FILE: ${{ inputs.prod_env_file }}
-          APP_BASE_URL: http://${{ inputs.prod_host }}:8000
+          APP_BASE_URL: https://it.462111.xyz
+          APP_HEALTHCHECK_URL: http://${{ inputs.prod_host }}:8000/health
           APP_HTTP_PORT: "8000"
           RUN_BROWSER_UAT: "0"
           RUN_TESTS: "0"

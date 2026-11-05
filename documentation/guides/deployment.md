@@ -12,6 +12,8 @@ Required variables:
 - `MCP_ENABLED`
 - `LOG_LEVEL`
 
+Optional pipeline variable: `APP_HEALTHCHECK_URL`. `deployment/scripts/remote-compose-deploy.sh` curls it from the target host after startup. It defaults to `$APP_BASE_URL/health`. The app deploy workflow sets it to `http://<host>:8000/health`, because `APP_BASE_URL` is the public HTTPS proxy hostname, which the target host may not resolve or trust.
+
 Optional first-run variable:
 
 - `ADMIN_INITIAL_PASSWORD`
@@ -54,7 +56,7 @@ Restore is intentionally manual. Inspect the target and use PostgreSQL tools suc
 
 Use `.github/workflows/local-pipeline.yml` for the local network pipeline:
 
-1. Deploy the checked-out source tree to UAT at `akun@app-uat` / `192.168.10.26`.
+1. Deploy the checked-out source tree to UAT at `akun@cursor-issue-tracker` / `192.168.10.20`. This is the dev host, so UAT runs as an isolated compose stack next to the live dev app (see "UAT co-hosted on the dev host" below).
 2. Verify UAT with Docker build, pre-migration backup, Alembic, tests, ruff, `/health`, MCP smoke, and browser UAT.
 3. Optionally deploy the same revision to production at `akun@app-prod` / `192.168.10.27` after UAT passes.
 4. Verify production with pre-migration backup, Alembic, `/health`, and MCP smoke.
@@ -91,18 +93,18 @@ The workflow runs on the issue-tracker self-hosted runner labeled `issue-tracker
 
 Runner-local SSH prerequisites:
 
-- The runner's existing `github` user SSH configuration can connect non-interactively to `akun@192.168.10.26` and `akun@192.168.10.27`.
+- The runner's existing `github` user SSH configuration can connect non-interactively to `akun@192.168.10.20` (UAT) and `akun@192.168.10.27` (production).
 - Do not write issue-tracker-specific keys or config into `/home/github/.ssh/config`; that user is shared by other local repo runners.
 
 Target host prerequisites:
 
-- UAT host is VM `114`, hostname `app-uat`, IP `192.168.10.26`.
+- UAT host is the dev host, hostname `cursor-issue-tracker`, IP `192.168.10.20`. (Until 2026-11 UAT ran on VM `114` / `app-uat` / `192.168.10.26`; that host no longer has an issue-tracker install.)
 - Production host is VM `119`, hostname `app-prod`, IP `192.168.10.27`.
 - Docker and Docker Compose plugin installed.
 - `akun` can run Docker commands.
 - SSH accepts the key stored in `LOCAL_DEPLOY_SSH_KEY`.
-- Port `8000` is reachable from the runner and from the browser used for UAT or production smoke checks.
-- `/home/akun/issue-tracker` exists and is writable by `akun`.
+- Production port `8000` and UAT port `8100` are reachable from the runner and from the browser used for smoke checks.
+- `/home/akun/issue-tracker` (production) or `/home/akun/issue-tracker-uat` (UAT) is writable by `akun`; the script creates `releases/` under it.
 
 Production configuration prerequisite:
 
@@ -125,10 +127,11 @@ Pre-migration database dumps are written on the target host under:
 
 Run it from GitHub Actions with:
 
-- `uat_host`: `192.168.10.26`
+- `uat_host`: `192.168.10.20`
 - `prod_host`: `192.168.10.27`
 - `deploy_user`: `akun`
-- `deploy_path`: `/home/akun/issue-tracker`
+- `deploy_path`: `/home/akun/issue-tracker` (production)
+- `uat_deploy_path`: `/home/akun/issue-tracker-uat`
 - `prod_env_file`: `/home/akun/issue-tracker/prod.env`
 - `deploy_prod`: `false` for UAT-only, `true` to deploy production after UAT passes
 - `expected_deploy_sha`: the exact committed SHA the operator intends to deploy
@@ -141,10 +144,11 @@ git rev-parse HEAD
 git rev-parse @{u}
 gh workflow run local-pipeline.yml --ref <branch-or-sha> \
   -f expected_deploy_sha=<exact-committed-sha> \
-  -f uat_host=192.168.10.26 \
+  -f uat_host=192.168.10.20 \
   -f prod_host=192.168.10.27 \
   -f deploy_user=akun \
   -f deploy_path=/home/akun/issue-tracker \
+  -f uat_deploy_path=/home/akun/issue-tracker-uat \
   -f prod_env_file=/home/akun/issue-tracker/prod.env \
   -f deploy_prod=false
 ```
@@ -153,16 +157,31 @@ The workflow prints `GITHUB_REF` and `GITHUB_SHA` and refuses to deploy unless `
 
 The deploy script enforces environment-specific host checks:
 
-- UAT refuses to deploy unless `TARGET_HOST` is `192.168.10.26` and the remote hostname is `app-uat`.
+- UAT refuses to deploy unless `TARGET_HOST` is `192.168.10.20` and the remote hostname is `cursor-issue-tracker`.
+- UAT also refuses unless `COMPOSE_PROJECT_NAME` is set and is not `deployment`, `POSTGRES_CONTAINER_NAME` is set and is not `issue-tracker-postgres`, `DEPLOY_PATH` ends in `issue-tracker-uat`, and `APP_HTTP_PORT` is not `8000` or `8443`. These checks keep a UAT deploy from reusing the live dev stack's project, volume, container, checkout, or port.
 - Production refuses to deploy unless `TARGET_HOST` is `192.168.10.27`, the remote hostname is `app-prod`, `REMOTE_ENV_FILE` exists, and `APP_SECRET_KEY`, `DATABASE_URL`, and `POSTGRES_PASSWORD` are provided by that file.
 - Production refuses `SKIP_DB_BACKUP=1`.
 
 The remote app URLs are:
 
 ```text
-http://192.168.10.26:8000
-http://192.168.10.27:8000
+http://192.168.10.20:8100   UAT (direct; public name https://uat.it.462111.xyz once DNS/proxy exist)
+http://192.168.10.27:8000   production (direct; public name https://it.462111.xyz once DNS/proxy exist)
 ```
+
+`dev.it.462111.xyz` is reserved for the dev app on `192.168.10.20:8000`. As of 2026-11-05 none of these names resolve, and no reverse proxy is configured. `APP_BASE_URL` is informational today (only `config.py` reads it), and health checks use the direct `APP_HEALTHCHECK_URL`, so deploys do not depend on DNS.
+
+### UAT co-hosted on the dev host
+
+| | Dev (live) | UAT |
+|---|---|---|
+| Checkout / deploy path | `/home/akun/issue-tracker` | `/home/akun/issue-tracker-uat/current` |
+| Compose project | `deployment` (default) | `issue_tracker_uat` |
+| Postgres container | `issue-tracker-postgres` | `issue-tracker-uat-postgres` |
+| Data volume | `deployment_issue_tracker_pgdata` | `issue_tracker_uat_issue_tracker_pgdata` |
+| App port | `8000` (`8443` HTTPS profile) | `8100` |
+
+Never run UAT compose commands without `COMPOSE_PROJECT_NAME=issue_tracker_uat POSTGRES_CONTAINER_NAME=issue-tracker-uat-postgres APP_HTTP_PORT=8100`. Without them, compose falls back to the dev project and the dev volume. The first UAT deploy on this host creates an empty UAT database. Seeding it from dev is a separate destructive refresh (`/data-refresh`, `CONFIRM OVERWRITE uat`).
 
 Observability follow-up:
 
