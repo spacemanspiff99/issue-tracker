@@ -73,6 +73,7 @@ Thumbs.db
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
+.claude/settings.local.json
 *.swp
 *.swo
 *~
