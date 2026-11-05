@@ -12,6 +12,10 @@ on:
       - "**/AGENTS.md"
       - "**/AGENTS.override.md"
       - "CLAUDE.md"
+      - ".claude/settings.json"
+      - ".claude/hooks/**"
+      - ".claude/skills/**"
+      - ".mcp.json"
       - ".github/workflows/mirror-rules.yml"
   workflow_dispatch: {}
 
@@ -84,6 +88,18 @@ jobs:
           if [ -f source/CLAUDE.md ]; then
             cp source/CLAUDE.md "${CLAUDE_DEST}/CLAUDE.md"
           fi
+          for f in .claude/settings.json .mcp.json; do
+            if [ -f "source/${f}" ]; then
+              mkdir -p "${CLAUDE_DEST}/$(dirname "${f}")"
+              cp "source/${f}" "${CLAUDE_DEST}/${f}"
+            fi
+          done
+          for d in .claude/hooks .claude/skills; do
+            if [ -d "source/${d}" ]; then
+              mkdir -p "${CLAUDE_DEST}/${d}"
+              cp -a "source/${d}/." "${CLAUDE_DEST}/${d}/"
+            fi
+          done
           cat > "${RULE_DEST}/.mirror-source.json" <<EOF
           {
             "project": "${PROJECT_NAME}",

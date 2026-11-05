@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "issue-tracker": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "compose",
+        "-f",
+        "deployment/docker-compose.local.yml",
+        "run",
+        "--rm",
+        "-T",
+        "app",
+        "python",
+        "-m",
+        "issue_tracker.mcp.server"
+      ]
+    }
+  }
+}

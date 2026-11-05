@@ -23,9 +23,9 @@ Load these rules by task shape:
 - Keep Alembic migrations in the single central `migrations/` folder. Do not create another migration folder.
 - Keep docs in `documentation/`; planning docs live in `documentation/planning/`, architecture in `documentation/architecture/`, guides in `documentation/guides/`, and standards in `documentation/standards/`.
 - Do not create orphan documentation. New docs must be linked from the relevant planning doc, guide index, README section, issue, sprint, or another discoverable document.
-- Do not create orphan rules or guidance. New rule files must be referenced from `AGENTS.md`, this rule index, the mirror workflow, or the relevant harness entrypoint.
+- Do not create orphan rules or guidance. New rule, skill, or harness config files must be referenced from `AGENTS.md`, `CLAUDE.md`, this rule index, the mirror workflow, or the relevant harness entrypoint.
 - Keep deployment files in `deployment/`; root may contain only unavoidable metadata such as `README.md`, `pyproject.toml`, `.gitignore`, and `.env.example`.
-- Use a single `main` branch strategy unless the repository explicitly adopts another branch model.
+- Branch model: `dev` is the integration branch; short-lived feature/fix branches branch from and merge back into `dev`; `dev` is promoted to `main` by pull request. Do not commit directly to `main`.
 - Do not import any peer project's category taxonomy. This project owns its taxonomy in `documentation/standards/ISSUE_LOG.md`.
 - Treat categories as project-scoped data in the app schema. Never hardcode weather-app, investments, or storyteller category names into application logic.
 - Preserve the manual tracker ID convention from vibecoding: issues and sprints share a project-local `NNNN` sequence displayed with four zero-padded digits.
@@ -86,6 +86,7 @@ Load these rules by task shape:
 
 | Date | Change | Peer sources consulted | Skipped |
 |---|---|---|---|
+| 2026-11-05 | Replaced stale single-`main` branch rule with the actual `dev` integration flow; added Claude Code (`CLAUDE.md`, `.claude/`) to the orphan-guidance rule. `AGENTS.md` is now shared by Codex and Claude Code. | Repo branch history (`dev` -> `main` PR #2). | Cursor GPT model policy left unchanged. |
 | 2026-05-15 | Added MagicPatterns UI provenance protection: imported or identified MagicPatterns UI must not be modified without explicit user instruction. | User direction to recover the MagicPatterns rule from vibecoding; local references note Magic Patterns rules existed in peer rule sources. | Direct vibecoding contents were unavailable through local checkout and unauthenticated GitHub API. |
 | 2026-04-25 | Restored manual issue-tracking naming discipline: shared issue/sprint `NNNN` IDs, zero-padded sprint labels, and two-digit sprint task prompt sequencing. | weather-app local markdown tracker rules and vibecoding sync guide issue-tracker recipe | Weather-specific host, branch, deployment, Linear back-port, and auto-merge rules. |
 | 2026-04-24 | Initial issue-tracker rules stack: core, agents, AC, backend, devops, project issue-log taxonomy, and vibecoding onboarding scaffold. Adapted local markdown tracker workflow into a database-backed FastAPI/Jinja/MCP product. | weather-app `14ec98d23b9756fe9c2352a23f49d4f453bff60e`; investments `05141f032eb1539779ab496c9e7a7be47c8d02c7`; storyteller `39df73305bdef93b66c13df925fe222106516fef`; handbrake2resilio `6b428bca2688ccb4624bcb90c76c13b398be6a34`; scripts `abba09819c09a6cadee50efa1936e00c0a1a071f` | Weather host topology and dev/master branch flow; React/Playwright/Magic Patterns rules; investments finance taxonomy and simulation rules; storyteller iOS/Firebase rules; all peer `ISSUE_LOG.md` content. |

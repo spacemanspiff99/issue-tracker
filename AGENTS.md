@@ -1,6 +1,6 @@
-# Codex Project Instructions
+# Agent Project Instructions
 
-These instructions apply to the whole repository. They are for OpenAI Codex only. Keep Cursor guidance in `.cursor/rules/`; put Codex command approval policy only in `.codex/rules/*.rules`.
+These instructions apply to the whole repository and are shared by OpenAI Codex (reads `AGENTS.md` directly) and Claude Code (`CLAUDE.md` imports this file). Keep harness-specific guidance out of this file: Cursor guidance lives in `.cursor/rules/`, Codex command approval policy in `.codex/rules/*.rules`, and Claude Code specifics in `CLAUDE.md`, `.claude/settings.json`, and `.claude/skills/`.
 
 ## Project Shape
 
@@ -9,8 +9,8 @@ These instructions apply to the whole repository. They are for OpenAI Codex only
 - Keep Alembic migrations in the root `migrations/` folder. Do not add a second migration tree.
 - Keep docs in `documentation/`, deployment assets in `deployment/`, and root files limited to unavoidable project metadata.
 - Do not create orphan documentation: every new doc must be linked from the relevant planning doc, guide index, README section, issue, sprint, or another discoverable document.
-- Do not create orphan rules or guidance: every new rule file must be referenced from `AGENTS.md`, `.cursor/rules/core.mdc`, the mirror workflow, or the relevant harness entrypoint.
-- Use the single `main` branch strategy unless the repository explicitly adopts another branch model. Prefer one behavior change per PR.
+- Do not create orphan rules or guidance: every new rule, skill, or harness config file must be referenced from `AGENTS.md`, `CLAUDE.md`, `.cursor/rules/core.mdc`, the mirror workflow, or the relevant harness entrypoint.
+- Branch model: `dev` is the integration branch; short-lived feature/fix branches (for example `deploy/<slug>`, `chore/<slug>`) branch from and merge back into `dev`; `dev` is promoted to `main` by pull request. Do not commit directly to `main`. Prefer one behavior change per PR.
 
 ## Dual Tracker Dogfooding
 
@@ -25,15 +25,19 @@ These instructions apply to the whole repository. They are for OpenAI Codex only
 
 ## Harness And Model Guidance
 
-- Preserve harness boundaries: Cursor rules belong in `.cursor/rules/`, Codex project guidance belongs in `AGENTS.md`, Codex command approval policy belongs in `.codex/rules/*.rules`, and Claude Code memory belongs in `CLAUDE.md`.
-- Do not copy Codex/GPT model guidance into Cursor `.mdc` files unless Cursor behavior is intentionally changing too.
+- Preserve harness boundaries: Cursor rules belong in `.cursor/rules/`, shared agent guidance belongs in `AGENTS.md`, Codex command approval policy belongs in `.codex/rules/*.rules`, and Claude Code memory, settings, and skills belong in `CLAUDE.md` and `.claude/`.
+- Model choice is harness-specific. Each issue, sprint task, or execution prompt names a recommended reasoning tier (`standard` or `deep`) plus the concrete model for the harness that will run it. `deep` applies to architecture, schema or migration invariants, auth and secrets, deployment, MCP contracts, manual UAT release decisions, difficult debugging, and any work that can corrupt tracker state; everything else is `standard`.
+- Claude Code model mapping lives in `CLAUDE.md`. Do not copy one harness's model guidance into another harness's files unless that harness's behavior is intentionally changing too.
+- For all harnesses, write outcome-first instructions, explicit success criteria, allowed side effects, verification expectations, evidence rules, and clear stop conditions.
+- For planning or prompt creation, use sequential role passes as relevant: project manager for scope, engineering manager for decomposition, backend/frontend engineer for implementation risk, DevOps for runtime and migration risk, and QA engineer for verification. Do not use these as parallel personas unless the user explicitly requests parallel agent work.
+
+### Codex Model Policy
+
 - Prefer GPT-5.5 for Codex work when available; use GPT-5.4 as fallback and GPT-5.4-mini only for narrow, low-risk coding or delegated subagent work.
 - Use GPT-5.5 `medium` for normal implementation, tests, documentation, and focused route/service changes.
 - Use GPT-5.5 `high` for architecture, schema or migration invariants, auth and secrets, deployment, MCP contracts, manual UAT release decisions, difficult debugging, and any work that can corrupt tracker state.
 - Each issue, sprint task, or execution prompt must name the recommended model and reasoning level before implementation starts. If the active model/reasoning does not match, record the mismatch and either adjust or explicitly accept the risk.
 - When delegating to subagents, use GPT-5.5 with `high` reasoning when the subtask is complex, security-sensitive, schema-critical, deployment-critical, MCP-contract-sensitive, or likely to require difficult debugging. Use lighter models only for bounded mechanical subtasks with low blast radius.
-- Follow OpenAI Codex guidance: outcome-first instructions, explicit success criteria, allowed side effects, verification expectations, evidence rules, and clear stop conditions.
-- For planning or prompt creation, use sequential role passes as relevant: project manager for scope, engineering manager for decomposition, backend/frontend engineer for implementation risk, DevOps for runtime and migration risk, and QA engineer for verification. Do not use these as parallel personas unless the user explicitly requests parallel agent work.
 
 ## Domain Rules
 
@@ -78,8 +82,8 @@ These instructions apply to the whole repository. They are for OpenAI Codex only
 - Service behavior should have tests before the same behavior is treated as complete through web routes or MCP tools.
 - Schema changes require an Alembic migration plus a check that `alembic upgrade head` works on an empty database.
 - Deployment is not verified until `/health` confirms database connectivity.
-- When the user asks to deploy to UAT, first treat the current dev checkout as the intended source of truth. Check `git status`, identify uncommitted product/deployment/doc changes, and do not dispatch the GitHub Actions UAT workflow until the intended changes are committed and pushed to the branch/ref being deployed, or the user explicitly says to deploy a named older ref despite local drift.
-- Before dispatching a UAT workflow, state the exact branch and commit SHA that will deploy and pass that SHA as `expected_deploy_sha`. If the local checkout has uncommitted changes or the local branch differs from the remote ref, stop and resolve that mismatch instead of assuming GitHub has the same state.
+- When the user asks to deploy to UAT, first treat the current dev checkout as the intended source of truth. Check `git status`, identify uncommitted product/deployment/doc changes, and do not start the UAT deploy (`deployment/scripts/local-uat-deploy.sh`; the runner workflow is superseded) until the intended changes are committed and pushed to the branch/ref being deployed, or the user explicitly says to deploy a named older ref despite local drift.
+- Before a UAT deploy, state the exact branch and full commit SHA that will deploy and pass that SHA explicitly (`local-uat-deploy.sh <sha>`, or `expected_deploy_sha` for any workflow). The deploy builds from `git archive <sha>`, so local uncommitted changes never deploy; if they were intended, or the local branch differs from the remote ref, stop and resolve that mismatch first.
 - UAT and production deployment move code only and must preserve the existing target database by default. Do not reset target volumes, drop/recreate target databases, replace UAT data with dev data, or alter production data except through reviewed forward migrations.
 - Production data is the durable source of truth. Production deploys require pre-migration backup, forward-only migrations, health checks, and a clear deployed SHA; they must never include implicit data copy, reset, truncate, downgrade, or restore behavior.
 - Copying production data down to UAT or dev for realistic testing is a separate data refresh operation, not a deploy. It must be explicit about source `prod`, target `uat` or `dev`, destructive overwrite of the target database, pre-refresh backups of both source and target metadata, secret/session sanitization expectations, and post-restore verification. Never copy UAT or dev data upward into production.
@@ -90,7 +94,7 @@ These instructions apply to the whole repository. They are for OpenAI Codex only
 - Debug from evidence first. Inspect logs, runtime output, request/response bodies, and database state before changing logic. If the evidence is missing, add the smallest useful logging or diagnostic check.
 - UI-facing changes require browser or route-level verification that proves the page is styled and usable; a clean server log or lack of JavaScript errors is not enough.
 - Local manual UAT readiness requires a fresh container build, explicit migration, pytest gate, `/health` database check, setup/login path, project/issue/dependency/sprint/close path, and a written pass/fail notes location.
-- Run Playwright and browser UAT from the Docker image or an existing app container. Browser runtime dependencies such as Chromium libraries belong in the container image, for example through the Dockerfile's Playwright install step; do not install Playwright system dependencies on the host from Codex.
+- Run Playwright and browser UAT from the Docker image or an existing app container. Browser runtime dependencies such as Chromium libraries belong in the container image, for example through the Dockerfile's Playwright install step; do not install Playwright system dependencies on the host from an agent session.
 - Before Docker preflight builds, check available disk space with `df -h / /tmp` and `docker system df`. After isolated preflight builds or failed build attempts, remove the temporary preflight image and unused build cache when needed so large Playwright/browser layers do not fill the dev host. Prefer targeted cleanup such as `docker image rm <preflight-image>` and `docker builder prune`; ask before broad `docker system prune`, and never remove named volumes that may contain tracker data unless the user explicitly confirms that target.
 - If a command is blocked because the project is not initialized yet, report the exact command and verify the files that do exist.
 - After code or guidance changes, run the smallest relevant validation command and report anything blocked.
@@ -98,7 +102,7 @@ These instructions apply to the whole repository. They are for OpenAI Codex only
 ## Safety Boundaries
 
 - Do not commit secrets, `.env` files, local credentials, database dumps, backups, generated exports, or large local artifacts.
-- Do not install missing system packages, CLIs, package-manager dependencies, or host tools from Codex. If a required tool is missing, stop and ask the user to install or authenticate it manually, then continue after they confirm it is ready.
+- Do not install missing system packages, CLIs, package-manager dependencies, or host tools from an agent session. If a required tool is missing, stop and ask the user to install or authenticate it manually, then continue after they confirm it is ready.
 - Do not run host-level Playwright installers such as `playwright install --with-deps` outside Docker. If browser dependencies are missing, rebuild the container image or run the browser test inside the app container.
 - Do not run destructive commands such as `rm -rf`, `git reset --hard`, or force-push operations unless the user explicitly asks and confirms.
 - When running Docker Compose preflight checks from a temporary worktree on the dev host, use a unique compose project name or otherwise prove it will not recreate, stop, or replace the live dev app containers. Do not disrupt the user's active dev URL as part of UAT preparation.
