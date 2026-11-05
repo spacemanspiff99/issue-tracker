@@ -1,6 +1,6 @@
 # 0178: Production on k3s with a shared PostgreSQL
 
-Status: design, not started. Tracker issue `0178` (Sprint `0168` follow-on).
+Status: blocked on infra (shared Postgres, B2 backups, vault, ingress) by `infra2.dev`. Tracker issue `0178` (Sprint `0168` follow-on).
 
 Recommended model/reasoning: Claude Opus at high effort, or GPT-5.5 `high` (`deep` tier). This work covers deployment, the schema/migration path, secrets, and production data safety.
 
@@ -11,14 +11,28 @@ Recommended model/reasoning: Claude Opus at high effort, or GPT-5.5 `high` (`dee
 - No GitHub Actions runners are used. The old `.github/workflows/local-pipeline.yml` prod job targets `app-prod` / `192.168.10.27`, which is unreachable from the dev host (`No route to host` on 2026-11-05). That job is superseded by this issue.
 - Production data is the durable source of truth. Deploys are forward-only, take a backup before migrating, and never copy, reset, or restore data implicitly. See `AGENTS.md`.
 
-## Open questions (owner)
+## Owner answers (2026-11-05)
 
-1. **Cluster:** which k3s cluster, node, and `kubeconfig` context, and which namespace for issue-tracker?
-2. **Shared Postgres:** the in-cluster Service DNS name and port, the Postgres major version (local and UAT use 16), and who administers it.
-3. **Existing prod data:** does an issue-tracker production database already exist anywhere, for example on `192.168.10.27`? If it does, moving it is a separate migration plan with its own backup and verification.
-4. **Image delivery:** how images reach the cluster without CI runners. Options include a local registry, `k3s ctr images import`, or GHCR.
-5. **Ingress/TLS:** Traefik (the k3s default) plus cert-manager for `it.462111.xyz`, and where DNS is managed.
-6. **Backups:** what already backs up the shared Postgres, and where issue-tracker pre-migration dumps should go.
+1. **Shared Postgres does not exist yet.** A generic Postgres for k3s prod must be built first, with local and remote backups to Backblaze B2.
+2. **Secrets:** a generic vault on k3s is required.
+3. **Existing prod data:** none ("just Linear"). A read-only check of `app-uat` (`192.168.10.26`) on 2026-11-05 found no issue-tracker data, files, or volumes; its backups are weather-app dumps. There is nothing to migrate.
+4. **Image delivery / CI:** a k3s runner will be set up when the k3s work is ready.
+5. **Ingress/TLS:** owner asked for a recommendation (below).
+6. **Ownership:** the infra session `infra2.dev - issue tracker support` builds the shared Postgres, backups, vault, and ingress on k3s prod. This repo owns only the issue-tracker app manifests that consume them. The brief was sent on 2026-11-05.
+
+## Recommendations (sent to infra)
+
+- **Postgres:** CloudNativePG operator with a PG 16 `Cluster`. Each app gets its own database and login role (no superuser, `CREATEDB`, or `CREATEROLE`), and `CONNECT` is revoked from `PUBLIC`.
+- **Backups:** CNPG barman-cloud WAL archiving plus scheduled base backups to B2 over its S3-compatible API, giving off-site point-in-time recovery. A separate local copy (volume snapshot or `pg_dump` CronJob to another disk) covers the local side. A test restore is required as evidence.
+- **Vault:** OpenBao or HashiCorp Vault with the External Secrets Operator, Kubernetes auth scoped per namespace, unseal and recovery keys held outside the cluster, and Vault storage backed up to B2.
+- **Ingress/TLS:** k3s's bundled Traefik plus cert-manager, with a Let's Encrypt DNS-01 wildcard `*.it.462111.xyz`. DNS-01 works for LAN-only hosts without opening port 80. Names: `it.462111.xyz` for prod (k3s), `uat.it.462111.xyz` for UAT (`192.168.10.20:8100`), `dev.it.462111.xyz` for dev (`192.168.10.20:8000`). The DNS host for `462111.xyz` and the split-DNS approach are pending from infra.
+
+## Waiting on infra
+
+- Postgres Service DNS name and port, the `issue_tracker` database and role, and the connection budget.
+- Vault/ESO secret path (proposed `apps/issue-tracker/prod`: `DATABASE_URL`, `APP_SECRET_KEY`, `ADMIN_INITIAL_PASSWORD`) and the k8s auth role.
+- B2 bucket and prefix layout, backup schedule, and restore evidence.
+- Cluster context, namespace, ingress class, and cert issuer.
 
 ## Proposed design (to confirm)
 
@@ -52,4 +66,4 @@ curl -fsS https://it.462111.xyz/health
 
 ## STOP
 
-Do not create cluster resources, databases, roles, or Secrets until the owner answers the open questions. Any first production deploy needs the exact SHA, backup plan, and rollback outline stated, followed by explicit owner confirmation.
+Issue-tracker does not create cluster resources, databases, roles, or Secrets itself; infra owns those. App manifests start once infra returns the items under "Waiting on infra". Any first production deploy needs the exact SHA, backup plan, and rollback outline stated, followed by explicit owner confirmation.
