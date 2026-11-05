@@ -27,7 +27,9 @@
       "Bash(gh run view:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr list:*)",
-      "Bash(curl -fsS http://localhost:8000/health)"
+      "Bash(curl -fsS http://localhost:8000/health)",
+      "Bash(curl -fsS http://192.168.10.20:8100/health)",
+      "Bash(DEPLOY_DRY_RUN=1 deployment/scripts/local-uat-deploy.sh:*)"
     ],
     "ask": [
       "Bash(docker compose -f deployment/docker-compose.local.yml run --rm app alembic upgrade:*)",
@@ -40,7 +42,11 @@
       "Bash(git push:*)",
       "Bash(ssh:*)",
       "Bash(scp:*)",
-      "Bash(rsync:*)"
+      "Bash(rsync:*)",
+      "Bash(deployment/scripts/local-uat-deploy.sh:*)",
+      "Bash(bash deployment/scripts/local-uat-deploy.sh:*)",
+      "Bash(deployment/scripts/remote-compose-deploy.sh:*)",
+      "Bash(bash deployment/scripts/remote-compose-deploy.sh:*)"
     ],
     "deny": [
       "Bash(sudo:*)",

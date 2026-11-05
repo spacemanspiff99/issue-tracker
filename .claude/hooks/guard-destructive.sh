@@ -29,14 +29,19 @@ fi
 [[ "$cmd" =~ git[[:space:]]+reset[[:space:]]+--hard ]] && block "git reset --hard discards work."
 [[ "$cmd" =~ git[[:space:]]+clean[[:space:]]+-[a-z]*f ]] && block "git clean -f deletes untracked files."
 [[ "$cmd" =~ rm[[:space:]]+-[a-z]*r[a-z]*f|rm[[:space:]]+-[a-z]*f[a-z]*r ]] && block "rm -rf requires explicit user confirmation."
-[[ "$cmd" =~ TEST_DATABASE_URL=.*(@postgres[:/]|192\.168\.10\.2[67]|issue-tracker\.akun) ]] && block "TEST_DATABASE_URL points at a real tracker database; tests drop_all."
+[[ "$cmd" =~ TEST_DATABASE_URL=.*(@postgres[:/]|@issue-tracker(-uat)?-postgres|192\.168\.10\.2[067]|issue-tracker\.akun|it\.462111\.xyz) ]] && block "TEST_DATABASE_URL points at a real tracker database; tests drop_all."
 
 # Host Playwright installs are banned; inside docker compose run/exec they are allowed.
 if [[ "$cmd" =~ playwright[[:space:]]+install ]] && ! [[ "$cmd" =~ docker[[:space:]]+(compose[^\;\&\|]*[[:space:]](run|exec)|exec|build) ]]; then
   block "Host Playwright install. Browser deps belong in the Docker image."
 fi
 
-# UAT/prod workflow dispatch must pin the exact SHA.
+# Local UAT deploy must pin the exact SHA (the script also refuses short/unpushed SHAs).
+if [[ "$cmd" =~ local-uat-deploy\.sh ]] && ! [[ "$cmd" =~ local-uat-deploy\.sh[[:space:]]+[\"\']?[0-9a-f]{40}([\"\'[:space:]]|$) ]]; then
+  block "local-uat-deploy.sh needs a full 40-char SHA argument. Use /uat-deploy."
+fi
+
+# Superseded runner workflow (2026-11-05). Kept: dispatch must still pin the exact SHA.
 if [[ "$cmd" =~ gh[[:space:]]+workflow[[:space:]]+run.*local-pipeline ]] && ! [[ "$cmd" =~ expected_deploy_sha=[0-9a-f]{40} ]]; then
   block "local-pipeline dispatch must pass -f expected_deploy_sha=<full 40-char SHA>. Use /uat-deploy."
 fi

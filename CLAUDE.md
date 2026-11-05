@@ -42,7 +42,7 @@ Run browser and Playwright tests inside the image or app container only (see `do
 
 Use these project skills for high-risk or repeated workflows rather than improvising:
 
-- `/uat-deploy`: source-of-truth gate and SHA-pinned UAT/prod workflow dispatch.
+- `/uat-deploy`: source-of-truth gate, dry run, and SHA-pinned local UAT deploy on the dev host (`deployment/scripts/local-uat-deploy.sh`). There is no production path until issue `0178` (k3s).
 - `/data-refresh`: destructive prod->uat/dev or dev->uat data refresh with the exact `CONFIRM OVERWRITE <target>` gate.
 - `/local-uat-preflight`: fresh build, migration, tests, `/health`, browser UAT, and Docker cleanup without disturbing the live dev app.
 - `/sprint-closeout`: tracker and markdown reconciliation, AC/IT checklist, evidence, and STOP handoff.

@@ -1,67 +1,64 @@
 ---
 name: uat-deploy
-description: Deploy committed code to UAT (and optionally production) through the SHA-pinned local-pipeline GitHub Actions workflow. Use when the user asks to deploy, ship, or push to UAT or production. Not for data refresh; use data-refresh for that.
+description: Deploy an exact pushed commit to UAT on the dev host with deployment/scripts/local-uat-deploy.sh (local, no runners, isolated issue_tracker_uat stack). Use when the user asks to deploy, ship, or push to UAT. Production is not supported until issue 0178 (k3s). Not for data refresh; use data-refresh for that.
 disable-model-invocation: true
 ---
 
-# UAT / Production Code Deploy
+# UAT Code Deploy (local, dev host)
 
-Source of truth: `documentation/guides/deployment.md` and the Verification rules in `AGENTS.md`. If they disagree with this skill, the docs win; report the drift.
+Source of truth: `documentation/guides/deployment.md` ("Local UAT Deploy (No Runners)" and "UAT co-hosted on the dev host") and the Verification rules in `AGENTS.md`. If they disagree with this skill, the docs win; report the drift.
 
-A deploy moves **code only**. It never copies, resets, or restores target data.
+A deploy moves **code only**. It never copies, resets, or restores target data. UAT runs on the dev host `192.168.10.20` (`cursor-issue-tracker`) next to the live dev app. It must never touch the dev stack (project `deployment`, container `issue-tracker-postgres`, volume `deployment_issue_tracker_pgdata`, port `8000`).
+
+Production: there is no supported deploy path. Production moves to k3s with a shared Postgres and vault (issue `0178`, `documentation/issues/0178-prod-k3s-shared-postgres.md`). The `.github/workflows/local-pipeline.yml` runner workflow is **superseded**. Do not dispatch it.
 
 ## 1. Source-of-truth gate (STOP on any mismatch)
 
 ```bash
+git fetch origin
 git status --short --branch
-git rev-parse HEAD
-git rev-parse @{u}
-git fetch origin && git rev-parse origin/$(git branch --show-current)
+git rev-parse origin/dev
 ```
 
-- Uncommitted product, UI, schema, deployment, or doc changes: STOP. Offer to commit and push them, or ask the user to name an older SHA explicitly.
-- Local `HEAD` differs from the remote ref: STOP and resolve it (push, or pick the remote SHA explicitly).
-- Record the branch and the **full 40-char SHA** that will deploy.
+- The deploy source is `git archive <sha>`, so uncommitted local changes never deploy. If the user expects them to, STOP: they must be committed, merged to `dev` by PR, and pushed first.
+- Default ref is `origin/dev`. Any other ref needs the user to name it explicitly.
+- Record the **full 40-char SHA**.
 
-## 2. State the operation, then wait for explicit confirmation
+## 2. Dry run (no changes)
+
+```bash
+DEPLOY_DRY_RUN=1 deployment/scripts/local-uat-deploy.sh <full-sha>
+```
+
+Pass only if it prints `DRY RUN: all guards passed`. Also check disk first: `df -h / /tmp` and `docker system df`.
+
+## 3. State the operation, then wait for explicit confirmation
 
 Report exactly:
 
-- Operation: code deploy via `.github/workflows/local-pipeline.yml`
-- Target: UAT `192.168.10.26` (hostname `app-uat`), plus production `192.168.10.27` only if `deploy_prod=true`
-- Ref and SHA
-- Data: preserved; the workflow takes a pre-migration backup under `/home/akun/issue-tracker/backups/<sha>-<timestamp>/`
+- Operation: local code deploy via `deployment/scripts/local-uat-deploy.sh`
+- SHA (full) and ref
+- Target: `issue_tracker_uat` stack, `/home/akun/issue-tracker-uat`, port `8100`, container `issue-tracker-uat-postgres`
+- Data: UAT volume `issue_tracker_uat_issue_tracker_pgdata` preserved, with a pre-migration backup under `/home/akun/issue-tracker-uat/backups/<sha>-<timestamp>/`. The dev volume is untouched.
 - Migrations: forward-only `alembic upgrade head`
-- Rollback outline: redeploy the previous SHA; a data restore needs a separate, explicit request naming the backup
+- Rollback outline: repoint `/home/akun/issue-tracker-uat/current` to the previous release and `up -d` with the UAT env. A data restore needs a separate, explicit request naming the backup.
 
-Production (`deploy_prod=true`) needs its own explicit "deploy to production" from the user. UAT approval does not carry over.
+Wait for the user to approve that exact SHA. Approval of an earlier SHA does not carry over.
 
-## 3. Dispatch
-
-```bash
-gh workflow run local-pipeline.yml --ref <branch> \
-  -f expected_deploy_sha=<full-sha> \
-  -f uat_host=192.168.10.26 \
-  -f prod_host=192.168.10.27 \
-  -f deploy_user=akun \
-  -f deploy_path=/home/akun/issue-tracker \
-  -f prod_env_file=/home/akun/issue-tracker/prod.env \
-  -f deploy_prod=false
-```
-
-The project guard hook blocks dispatch without a full `expected_deploy_sha`.
-
-## 4. Watch and verify
+## 4. Deploy and verify
 
 ```bash
-gh run list --workflow local-pipeline.yml --limit 3
-gh run watch <run-id> --exit-status
+deployment/scripts/local-uat-deploy.sh <full-sha>
+curl -fsS http://192.168.10.20:8100/health
+curl -fsS http://192.168.10.20:8000/health   # live dev must still be healthy, if it was running
 ```
 
-Pass only if: the "Verify deploy source" step shows `GITHUB_SHA == expected_deploy_sha`; backup, Alembic, tests, ruff, `/health` (DB connected), MCP smoke, and browser UAT all pass.
+The guard hook blocks the script without a full 40-char SHA. Pass only if: backup, Alembic, tests, ruff, `/health` (DB connected), MCP smoke, and browser UAT all pass, and the dev stack is unchanged.
 
-On failure: debug from the run logs (`gh run view <id> --log-failed`) before changing code. Do not re-dispatch with different inputs without telling the user.
+Any manual compose command against UAT must carry `COMPOSE_PROJECT_NAME=issue_tracker_uat POSTGRES_CONTAINER_NAME=issue-tracker-uat-postgres APP_HTTP_PORT=8100`, run from `/home/akun/issue-tracker-uat/current`. Without these, compose targets the dev stack.
+
+On failure: debug from the script output and `docker compose logs` (with the UAT env) before changing code. Do not re-run with different settings without telling the user.
 
 ## 5. Closeout
 
-Report: deployed SHA, run URL, target(s), data **preserved** (backup path if shown), check results, and anything blocked. Update the tracker issue or sprint evidence, plus a UAT note under `documentation/uat/` if this is a release gate.
+Report the deployed SHA, the release path, data **preserved** (with the backup path), check results, and anything blocked. Update the tracker issue or sprint evidence, plus a UAT note under `documentation/uat/` if this is a release gate.
