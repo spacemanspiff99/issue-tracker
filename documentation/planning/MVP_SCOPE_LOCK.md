@@ -22,3 +22,7 @@ This document records the original MVP boundary. Later dogfood sprints have adde
 - Background schedulers beyond health and one-off commands.
 
 Non-MVP requests should be recorded as backlog rather than folded into the active MVP.
+
+## Current MVP Target (2026-11-17)
+
+The owner has redefined MVP as replacing Linear for their other projects, running on the dev host at `dev.it.462111.xyz`. The plan is in `documentation/sprints/0180-mvp-linear-replacement.md`.
