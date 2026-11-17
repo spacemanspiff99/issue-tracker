@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from issue_tracker import __version__
@@ -526,10 +526,11 @@ class RecoveryBundleService:
         }
 
     def _alembic_revision(self) -> str | None:
-        try:
-            return self.session.execute(text("select version_num from alembic_version")).scalar_one_or_none()
-        except Exception:
+        # Check first: a failed SELECT aborts the PostgreSQL transaction, which breaks
+        # every later query in this session even when the exception is caught.
+        if not inspect(self.session.connection()).has_table("alembic_version"):
             return None
+        return self.session.execute(text("select version_num from alembic_version")).scalar_one_or_none()
 
     @staticmethod
     def _git_commit() -> str | None:

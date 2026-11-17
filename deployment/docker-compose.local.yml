@@ -14,6 +14,23 @@ services:
     volumes:
       - issue_tracker_pgdata:/var/lib/postgresql/data
 
+  # Throwaway PostgreSQL for the test suite only. No volume (tmpfs), test profile,
+  # and a database name ending in _test, which tests/conftest.py requires.
+  postgres-test:
+    image: postgres:16-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: issue_tracker_test
+      POSTGRES_USER: issue_tracker_test
+      POSTGRES_PASSWORD: issue_tracker_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U issue_tracker_test -d issue_tracker_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
   app:
     build:
       context: ..
