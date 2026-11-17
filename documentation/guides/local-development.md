@@ -31,6 +31,15 @@ docker compose -f deployment/docker-compose.local.yml run --rm app python -m iss
 docker compose -f deployment/docker-compose.local.yml config
 ```
 
+The default suite runs on in-memory SQLite. To run it against PostgreSQL, use the throwaway `postgres-test` service (test profile, tmpfs, no volume). Never point `TEST_DATABASE_URL` at the dev, UAT, or prod database. `tests/conftest.py` refuses any non-SQLite database whose name does not end in `_test`.
+
+```bash
+DC="docker compose -f deployment/docker-compose.local.yml --profile test"
+$DC up -d --wait postgres-test
+$DC run --rm --no-deps -e TEST_DATABASE_URL=postgresql+psycopg://issue_tracker_test:issue_tracker_test@postgres-test:5432/issue_tracker_test app python -m pytest tests/ -p no:cacheprovider
+$DC rm -sf postgres-test
+```
+
 Run one-off commands:
 
 ```bash
