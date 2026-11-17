@@ -238,3 +238,30 @@ def test_registered_tools_match_smoke_list_and_tool_signatures(engine):
         fn = getattr(tools, name.replace(".", "_"))
         expected = set(inspect.signature(fn).parameters) - {"session"}
         assert set(tool.inputSchema.get("properties", {})) == expected, name
+
+
+def test_registered_tools_publish_typed_schemas_and_coerce_string_ids(engine, session):
+    """Regression: untyped wrappers sent IDs as strings, which PostgreSQL rejects."""
+    import asyncio
+
+    mcp = _registered_server(engine)
+    registered = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+    for name in ("issue.get", "sprint.get", "next_action", "category.list", "sprint.add_issue"):
+        props = registered[name].inputSchema["properties"]
+        id_props = {key: value for key, value in props.items() if key.endswith("_id")}
+        assert id_props, name
+        assert all(value.get("type") == "integer" for value in id_props.values()), (name, id_props)
+    assert registered["issue.get"].inputSchema["properties"]["include_full"]["type"] == "boolean"
+
+    project = ProjectService(session).create_project("Typed")
+    issue = IssueService(session).create_issue(project.id, "Coerced", "- [ ] ok")
+    session.commit()
+
+    found = _call(mcp, "issue.search", {"project_id": str(project.id), "limit": "5"})
+    got = _call(mcp, "issue.get", {"issue_id": str(issue.id)})
+    nxt = _call(mcp, "next_action", {"project_id": str(project.id)})
+
+    assert [row["title"] for row in found["issues"]] == ["Coerced"]
+    assert found["limit"] == 5
+    assert got["issue"]["title"] == "Coerced"
+    assert isinstance(nxt, dict)
