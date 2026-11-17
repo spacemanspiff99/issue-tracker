@@ -1,6 +1,6 @@
 # Sprint Plan: MVP, Replace Linear For Owner Projects
 
-Status: proposed (markdown only). Tracker records are not created yet because the tracker MCP tools fail on PostgreSQL (see `0181`). Create the sprint and issues in the tracker as the first step after `0181` lands, and confirm IDs then. `0180` is the next free ID after `0179` as of 2026-11-17.
+Status: active. Tracker sprint `0180` (created 2026-11-17) holds issues `0181`–`0204` plus `0176`, `0144`, `0145`, `0152`. IDs match this plan. `0195` is the test-isolation follow-up, and `0204` is the ADR.
 
 Created: 2026-11-17
 
@@ -36,7 +36,7 @@ The dev database (`issue-tracker-postgres`, volume `issue_tracker_pgdata`) becom
 | 5 | `0185` | C. Durable runtime | urgent | Pin the live instance to a known SHA and add a restart policy |
 | 6 | `0186` | C. Durable runtime | urgent | Scheduled backups with an off-host copy and a restore drill |
 | 7 | `0176` | C. Durable runtime | high | HTTPS for `dev.it.462111.xyz` (Caddy + AdGuard), existing issue |
-| 8 | `0189a`, `0187`, `0190`–`0200` | D. Linear-compatible API | urgent | ADR, keys, team/state model, labels, comments, relations, milestones, uploads, `/graphql` subset, endpoint overrides, GitHub automation, MCP compat |
+| 8 | `0204`, `0187`, `0190`–`0200` | D. Linear-compatible API | urgent | ADR, keys, team/state model, labels, comments, relations, milestones, uploads, `/graphql` subset, endpoint overrides, GitHub automation, MCP compat |
 | 9 | `0188` | E. Owner UI parity | high | Issue detail, board, and filters for the new fields; per-repo projects |
 | 10 | `0189` | F. MVP gate | urgent | Pilot with one repo, run the full gate, record the MVP decision |
 
@@ -140,7 +140,7 @@ This is a `deep` architecture change touching schema, auth, and the API contract
 
 | ID | Issue | Tier |
 |---|---|---|
-| `0189a` | ADR: Linear-compatible team/project/state/identifier model and GraphQL subset, scoped from the trace fixtures | deep |
+| `0204` | ADR: Linear-compatible team/project/state/identifier model and GraphQL subset, scoped from the trace fixtures | deep |
 | `0187` | API keys: per-team keys, hashed at rest, created and revoked in the web UI, sent as `Authorization: <key>` (`IT-5`) | deep |
 | `0190` | Schema: teams, typed workflow states with position, team-wide identifier sequence, project to team, issue `sortOrder`, priority 0–4. Migration plus backfill keeps the existing tracker project working (`IT-1`, `IT-3`) | deep |
 | `0191` | Labels (team-scoped, color, description, create), markdown descriptions, parent/sub-issues | standard |
@@ -218,7 +218,7 @@ curl -fsS https://dev.it.462111.xyz/health
 
 Progress as of 2026-11-17:
 
-- `0181`: PR #36 (`fix/mcp-typed-args`). Opus review approved. Re-review in progress after `dev` moved. PostgreSQL suite: 54 passed, 1 skipped, 1 environmental failure.
+- `0181` done: PR #36 merged into `dev` (`c44c20f`). Opus review PASS, twice.
 - PostgreSQL test support: PR #37 merged into `dev` (`2879038`). The `postgres-test` service plus a `_test` name guard in `tests/conftest.py` and the `.claude` hook. It also fixes the recovery-bundle aborted-transaction bug that the PostgreSQL run exposed.
 - Commit/PR/Opus-review rule and hook update: pushed to PR #33 (`chore/claude-code-guidance`, `c773286`).
 - `0183` done: 21 test projects deleted. Project 1 is intact (167 issues, 12 sprints). `0153` cancelled.
@@ -226,4 +226,4 @@ Progress as of 2026-11-17:
 - `0201`: fixtures received for relay67 (57 lines) and weather-app (49 lines). matterhub is pending (its session was offline).
 - Follow-ups: `test_release_intake_sprint_assignment_and_board_filters` writes into the checkout's real `exports/`, so it should use a tmp dir. Add a unit test for `_alembic_revision` without `alembic_version`.
 
-Next: merge #36 after the re-review. Create sprint `0180` and its issues in the tracker. Write the `0189a` ADR and get it Opus-reviewed. Then Phase C (`0185`, `0186`, `0176`) and Phase D in fresh sessions, one layer per PR.
+Next: write the `0204` ADR and get it Opus-reviewed. Then Phase C (`0185`, `0186`, `0176`) and Phase D in fresh sessions, one layer per PR.
