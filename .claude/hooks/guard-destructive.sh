@@ -30,6 +30,11 @@ fi
 [[ "$cmd" =~ git[[:space:]]+clean[[:space:]]+-[a-z]*f ]] && block "git clean -f deletes untracked files."
 [[ "$cmd" =~ rm[[:space:]]+-[a-z]*r[a-z]*f|rm[[:space:]]+-[a-z]*f[a-z]*r ]] && block "rm -rf requires explicit user confirmation."
 [[ "$cmd" =~ TEST_DATABASE_URL=.*(@postgres[:/]|@issue-tracker(-uat)?-postgres|192\.168\.10\.2[067]|issue-tracker\.akun|it\.462111\.xyz) ]] && block "TEST_DATABASE_URL points at a real tracker database; tests drop_all."
+# PostgreSQL tests are allowed only against a throwaway database whose name ends in _test
+# (the postgres-test compose service). tests/conftest.py enforces the same rule.
+if [[ "$cmd" =~ TEST_DATABASE_URL=[\"\']?postgres[^[:space:]]*/([A-Za-z0-9_]+) ]] && ! [[ "${BASH_REMATCH[1]}" =~ _test$ ]]; then
+  block "TEST_DATABASE_URL must name a throwaway database ending in _test (postgres-test service)."
+fi
 
 # Host Playwright installs are banned; inside docker compose run/exec they are allowed.
 if [[ "$cmd" =~ playwright[[:space:]]+install ]] && ! [[ "$cmd" =~ docker[[:space:]]+(compose[^\;\&\|]*[[:space:]](run|exec)|exec|build) ]]; then

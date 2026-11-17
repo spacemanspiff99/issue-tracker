@@ -54,4 +54,8 @@ Use these project skills for high-risk or repeated workflows rather than improvi
 ### Git
 
 - Branch from `dev` and open PRs into `dev`. Promote `dev` to `main` only by PR, and only when asked.
-- Commit or push only when the user asks.
+- For work tracked in an active sprint or issue, Claude Code may commit, push its feature/fix branch, and open a PR into `dev` without asking each time (owner standing approval, 2026-11-17).
+- Merge a PR into `dev` only after (1) the Docker test gate and `ruff` pass, and (2) an independent Opus review subagent (read-only) has reviewed the diff against fresh `origin/dev` and approved. Give the reviewer the diff and the issue's acceptance criteria, not your conclusion. The reviewer checks target freshness and merge base, overlap with other open branches, test evidence for each acceptance criterion, forbidden scope (secrets, data, deploy targets), model attribution, and rendered evidence for UI changes. Fix any FAIL finding and get a re-review. If `dev` moved after the review, review again.
+- PR bodies carry `Model: <model> (effort: <level>)`. Merge notes record the reviewer verdict, the reviewed target SHA, the merge base, and the tracker issues carried with their status before and after. This mirrors the weather-app Shared Branch Integration Gate.
+- Never force-push (including `--force-with-lease`) to `dev` or `main`, and never resolve conflicts by taking whole-file ours/theirs.
+- Outside tracked work, commit or push only when the user asks. Never push to `main`, force-push, or merge `dev` into `main` without an explicit request.
