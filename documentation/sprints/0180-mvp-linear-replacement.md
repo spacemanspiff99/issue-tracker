@@ -102,7 +102,7 @@ Recommendation: run the live tracker as a SHA-pinned stack built from `git archi
 ### `0186` Backups and restore
 
 - [ ] A daily `pg_dump -Fc` runs on a schedule (host cron or a compose service), with retention.
-- [ ] A copy leaves the host. Decision (2026-11-18, owner): the owner's Kopia backup server snapshots `backups/` off-host. B2 is dropped. The Kopia session has the request, and `0186` stays open until a Kopia snapshot exists and its restore path is documented.
+- [ ] A copy leaves the host. Decision (2026-11-18, owner): the owner's Kopia backup server snapshots `backups/` off-host. B2 is dropped. Tracked on the backup side as Linear WEA-3067 (child of WEA-2817). It is blocked on docker-host4 (WEA-3021), the operator confirming the tier (tier 1 proposed: B2 plus MinIO on pve), and an operator credential step on 192.168.10.20. Until WEA-3067 shows a dry-run and a restore check, keep local dump retention generous (at least 30 daily dumps). The restore drill waits for a proven Kopia restore. `0186` stays open until then.
 - [ ] A restore drill into a throwaway database is recorded in `documentation/uat/`.
 - [ ] `IT-5` checklist passes. Backup credentials are not committed.
 
