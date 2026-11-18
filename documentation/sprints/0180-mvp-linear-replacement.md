@@ -102,7 +102,7 @@ Recommendation: run the live tracker as a SHA-pinned stack built from `git archi
 ### `0186` Backups and restore
 
 - [ ] A daily `pg_dump -Fc` runs on a schedule (host cron or a compose service), with retention.
-- [ ] A copy leaves the host. Decision (2026-11-17, owner delegated): push the dumps to Backblaze B2 (S3 API, the same provider infra uses for k3s prod), under its own bucket prefix and with a scoped app key. Until infra issues the key, the owner's existing backup system pulls `backups/` as a stopgap, and `0186` stays open until B2 works.
+- [ ] A copy leaves the host. Decision (2026-11-18, owner): the owner's Kopia backup server snapshots `backups/` off-host. B2 is dropped. The Kopia session has the request, and `0186` stays open until a Kopia snapshot exists and its restore path is documented.
 - [ ] A restore drill into a throwaway database is recorded in `documentation/uat/`.
 - [ ] `IT-5` checklist passes. Backup credentials are not committed.
 
